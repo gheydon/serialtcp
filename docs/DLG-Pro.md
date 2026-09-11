@@ -228,14 +228,38 @@ So ResMan still has the port marked active; it has not noticed that the
 return at all -- it appears to wait for a port that will never come free -- so
 the obvious watchdog (deactivate, then activate) hangs rather than helping.
 
+**The port lifecycle, from the source and from the running machine.**
+`SetUp` is what waits for carrier on a port. It is never invoked by name
+anywhere in DLG's source, so the only thing that ever starts it is ResMan
+running the command registered by `ActivatePort`. When a call arrives the
+session chain takes over, and `SetUp` exits through `CleanUp()`:
+
+```c
+if (!spawned)      FreePort(port, "Setup");
+exit(s?5:0);
+```
+
+`FreePort` is what hands the port back so ResMan can start the next `SetUp`.
+A process dump from the running machine matches: at idle there is one
+`DLG:SetUp` per remote port; during a call the busy port's `SetUp` is replaced
+by `DLG:door`; after the call, `TR0` gets a fresh `SetUp` and the others do
+not.
+
+So the failure is that ResMan does not start the next `SetUp` on those ports.
+Whether `FreePort` is not being reached, or is reached and ResMan does not act
+on it, is not established -- it would need either a careful read of `RM/` or a
+debugger on the Amiga.
+
 **Unresolved.** Why `TR0` is special is not established. Worth noting that
 `Disk1:Install/start.2` only ever mounts and activates `TR0`, with a comment
 saying *"If you add more ports, you will need to add more ActivatePort
 commands for them"* -- so multi-node was a documented-but-less-travelled path.
-A licence limit is a candidate: `Handler/Handler/Main.c` checks the serial
-number and includes `<dialog/dead.h>` inside that check, and `dead.h` is one
-of the files missing from the released source, so that part cannot be read.
-The copy used here reports a blank `Serial Number:`.
+A licence limit is one candidate but a weak one: `Handler/Handler/Main.c`
+checks the serial number and includes `<dialog/dead.h>` inside that check, and
+`dead.h` is one of the files missing from the released source, so that part
+cannot be read -- but nothing in the licence terms mentions a node count, and
+`BadFlag` gates output rather than port restarts. Ports here serve their
+first call correctly, which is not what a node limit would look like.
 
 If you know DLG well, this is the place to look -- from the driver's side
 everything needed for the reopen is in place and waiting.
