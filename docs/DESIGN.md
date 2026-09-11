@@ -205,6 +205,41 @@ with Fast RAM all of this lands there and Chip is left for the display.
   are failed cleanly rather than hanging, but every session dies with it.
 - **No rate limiting.** `answer-baud` is cosmetic.
 
+## Possible future work: SSH
+
+Parked, but the research is worth keeping.
+
+**libssh2 is the obvious candidate and the wrong one.** It is client-side
+only -- "a client-side C library implementing the SSH2 protocol" -- so it
+cannot accept connections. It has been ported to Amiga (libssh2 1.8.0 is the
+basis of SSH2-Handler in OS4's Enhancer Software, over AmiSSL), but that is
+the client direction, for mounting remote filesystems over SFTP.
+
+For the server side the candidates are **libssh** (does both ends, uses
+OpenSSL) or **wolfSSH** (small and embedded-focused, but wants wolfSSL rather
+than OpenSSL, so that is a second port).
+
+**The crypto is already solved.** AmiSSL 5.6 tracks OpenSSL 3.6, ships 68k
+binaries, and is already present in the bebbo toolchain -- `libamisslauto.a`,
+`libamisslstubs.a`, `include/openssl/`. That pairs with libssh directly.
+
+**It would fit where the telnet codec sits.** Decoupling the codec from
+`struct STNode` for the queue left the right seam: each node would carry an
+SSH session instead of a `struct Telnet`, and the queue, `when-busy`, carrier
+detect and the AT engine would all be untouched.
+
+**The blocker is concurrency, not cryptography.** One `WaitSelect` loop serves
+every node, so a key exchange -- seconds of Diffie-Hellman and RSA on a 68030
+-- would freeze every other node, including callers mid-download. That is the
+same shape as the blocking `gethostbyname` noted above, but far worse: DNS is
+rare, a handshake happens on every call. It would have to run off the main
+loop, in a child process handing back an established session. Per-packet AES
+afterwards is fine at BBS speeds, and on an 060 or an accelerator the whole
+question largely goes away.
+
+The dull alternative, and what most retro boards offering SSH actually do, is
+to terminate SSH elsewhere and forward plain telnet to the Amiga on the LAN.
+
 ## Testing
 
 The FIFO, telnet codec and AT parser are pure logic and are compiled natively
