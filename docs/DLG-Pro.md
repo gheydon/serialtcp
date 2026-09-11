@@ -210,7 +210,23 @@ node 1: detached  ->  never came back
 node 0: detached  ->  attached   2s later   (cycled again, fine)
 ```
 
-**It is not the device driver.** The `detached` line is logged from inside
+**Proved not to be the driver, by swapping the units under the ports.**
+Normally `TR0` is on unit 0, so "the port that survives" and "unit 0" cannot
+be told apart. Reconfiguring `TR0` onto unit 1 and `TR1` onto unit 0
+separates them:
+
+```
+node 0: detached   (unit 0, now TR1)   never came back
+node 2: detached   (unit 2, TR2)       never came back
+node 1: detached   (unit 1, now TR0)   attached 2s later
+```
+
+Unit 0 -- previously the one that always recovered -- now dies, and unit 1
+recovers in its place, because `TR0` moved there. The survivor follows the
+DLG port name, not the device unit. Whatever is special about `TR0` is
+entirely inside DLG.
+
+**It is also not the driver by inspection.** The `detached` line is logged from inside
 `node_detach()`, which clears `su_Attached`, so a reopen would be accepted --
 and a successful open always logs `attached`. The absence of that line is
 evidence that DLG never called `OpenDevice()` again, rather than that the call
