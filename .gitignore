@@ -1,0 +1,16 @@
+# Build output
+build/
+
+# Third-party material, downloaded for reference and testing.
+# Not ours to redistribute:
+#   reference/dlg        DLG Professional -- freeware, but the author's terms
+#                        restrict it to non-commercial use on the Amiga, so it
+#                        is not ours to republish. Fetch it from Aminet:
+#                        aminet.net/comm/dlg/
+#   reference/trapdoor   TrapDoor -- copyrighted, source never released.
+#   reference/SimpleDevice  someone else's repository.
+reference/
+
+# Host-side test scratch
+tests/host/__pycache__/
+*.pyc

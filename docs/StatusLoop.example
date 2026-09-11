@@ -1,0 +1,8 @@
+; Refresh the status report into a file every few seconds, so it can be read
+; live from the host while calls are coming in.
+; No .key line here -- with one, Execute waits for arguments that never come,
+; which is why the first attempt produced nothing.
+Lab loop
+SerialTCP:SerialTCPStatus >SerialTCP:status.txt
+Wait 3
+Skip loop BACK

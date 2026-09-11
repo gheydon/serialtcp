@@ -1,0 +1,38 @@
+# SerialTCP test machine
+#
+# AmigaOS 3.2 (Kickstart 47.7) booting from the 3.2 CD laid out as a host
+# directory, with the SerialTCP build as a second drive.
+#
+# bsdsocket_library gives the Amiga a TCP stack straight from the host, so no
+# Roadshow or AmiTCP install is needed: SerialTCPd talks to the real network
+# and can be reached by telnetting to the Mac.
+
+[fs-uae]
+amiga_model = A1200
+accuracy = 1
+fast_memory = 8192
+kickstart_file = /Users/gordon/Amiga-test/kicka1200.rom
+
+hard_drive_0 = /Users/gordon/Amiga-test/OS32
+hard_drive_0_label = AmigaOS3.2
+
+hard_drive_1 = /Users/gordon/Amiga-test/SerialTCP
+hard_drive_1_label = SerialTCP
+
+# The whole point: emulated bsdsocket.library, bridged to the host network.
+bsdsocket_library = 1
+
+window_width = 1600
+window_height = 1000
+fullscreen = 0
+
+# No drive clicking. There is no real floppy in this setup and the noise is
+# just noise.
+floppy_drive_volume = 0
+floppy_drive_volume_empty = 0
+floppy_volume = 0
+
+# Fill the window with the Amiga display, so screen coordinates are coarse
+# enough to click accurately.
+scale = 100
+zoom = full
