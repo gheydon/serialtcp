@@ -195,6 +195,51 @@ comments after every entry, and so must yours.
 (`auto-answer 1` here), DLG's Answer String is ignored -- the DLG manual says
 as much. Configure one or the other to pick up the line.
 
+## Open problem: only TR0 recycles
+
+**Symptom.** After the first session on a node, DLG closes its unit and does
+not reopen it. Only `TR0` comes back. On a long run, a four-node board quietly
+becomes a one-node board.
+
+**It is the port number, not the order.** With `TR0` held busy so a second
+caller landed on `TR1`:
+
+```
+node 0: detached  ->  attached   3s later
+node 1: detached  ->  never came back
+node 0: detached  ->  attached   2s later   (cycled again, fine)
+```
+
+**It is not the device driver.** The `detached` line is logged from inside
+`node_detach()`, which clears `su_Attached`, so a reopen would be accepted --
+and a successful open always logs `attached`. The absence of that line is
+evidence that DLG never called `OpenDevice()` again, rather than that the call
+failed. `TR0` reopening repeatedly on the same driver makes the same point.
+
+**What DLG thinks is happening.** Re-running `ActivatePort` on a stopped port
+gives:
+
+```
+Error: Port is already active
+```
+
+So ResMan still has the port marked active; it has not noticed that the
+`SetUp` process on that port is gone. `DeactivatePort` on such a port does not
+return at all -- it appears to wait for a port that will never come free -- so
+the obvious watchdog (deactivate, then activate) hangs rather than helping.
+
+**Unresolved.** Why `TR0` is special is not established. Worth noting that
+`Disk1:Install/start.2` only ever mounts and activates `TR0`, with a comment
+saying *"If you add more ports, you will need to add more ActivatePort
+commands for them"* -- so multi-node was a documented-but-less-travelled path.
+A licence limit is a candidate: `Handler/Handler/Main.c` checks the serial
+number and includes `<dialog/dead.h>` inside that check, and `dead.h` is one
+of the files missing from the released source, so that part cannot be read.
+The copy used here reports a blank `Serial Number:`.
+
+If you know DLG well, this is the place to look -- from the driver's side
+everything needed for the reopen is in place and waiting.
+
 ## Licence note on DLG itself
 
 DLG Professional was released as freeware by Jeff Grimmett, with source, in
