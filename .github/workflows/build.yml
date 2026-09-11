@@ -14,6 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Tests first, so a logic error fails fast without waiting on the
+      # toolchain container -- and so build/ is created by this user. The
+      # container runs as root and can write into it afterwards; the other
+      # way round it cannot, and the tests fail on a permissions error.
+      - name: Unit tests
+        run: make test
+
       # The m68k-amigaos cross-compiler, in a container so the workflow does
       # not have to build a toolchain on every run.
       - name: Cross-compile for AmigaOS
@@ -33,8 +40,3 @@ jobs:
           head -c4 build/serialtcp.device | od -An -tx1 | tr -d ' \n' | grep -q '000003f3' \
             || { echo "serialtcp.device is not a valid Amiga hunk file"; exit 1; }
           echo "  serialtcp.device has a valid HUNK_HEADER"
-
-      # The FIFO, telnet codec, AT parser and queue logic are pure logic and
-      # build natively against the stub headers in tests/fake.
-      - name: Unit tests
-        run: make test
