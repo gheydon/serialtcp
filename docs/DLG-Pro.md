@@ -195,90 +195,58 @@ comments after every entry, and so must yours.
 (`auto-answer 1` here), DLG's Answer String is ignored -- the DLG manual says
 as much. Configure one or the other to pick up the line.
 
-## Open problem: only TR0 recycles
+## Multi-node needs a per-port session batch
 
-**Symptom.** After the first session on a node, DLG closes its unit and does
-not reopen it. Only `TR0` comes back. On a long run, a four-node board quietly
-becomes a one-node board.
+This one cost hours, so it is worth stating plainly.
 
-**It is the port number, not the order.** With `TR0` held busy so a second
-caller landed on `TR1`:
+**Symptom.** Each node serves exactly one call. After the caller hangs up the
+node closes its unit and never reopens it. Only `TR0` keeps working, so a
+four-node board quietly becomes a one-node board. Re-running `ActivatePort`
+reports `Error: Port is already active`, and `DeactivatePort` never returns.
 
-```
-node 0: detached  ->  attached   3s later
-node 1: detached  ->  never came back
-node 0: detached  ->  attached   2s later   (cycled again, fine)
-```
-
-**Proved not to be the driver, by swapping the units under the ports.**
-Normally `TR0` is on unit 0, so "the port that survives" and "unit 0" cannot
-be told apart. Reconfiguring `TR0` onto unit 1 and `TR1` onto unit 0
-separates them:
+**Cause.** Every port needs its own session batch in `DLGConfig:Batch/`, named
+`<port>.Startup`. Its last act is what matters:
 
 ```
-node 0: detached   (unit 0, now TR1)   never came back
-node 2: detached   (unit 2, TR2)       never came back
-node 1: detached   (unit 1, now TR0)   attached 2s later
+OM DLG:door
+DLG:hangup
+DLG:FreePort > NIL: -p tr0 -k "BBS"
+endcli
 ```
 
-Unit 0 -- previously the one that always recovered -- now dies, and unit 1
-recovers in its place, because `TR0` moved there. The survivor follows the
-DLG port name, not the device unit. Whatever is special about `TR0` is
-entirely inside DLG.
+`FreePort` is what hands the port back to ResMan so it can start the next
+`SetUp`. Without it the port stays marked active forever and is never
+restarted.
 
-**It is also not the driver by inspection.** The `detached` line is logged from inside
-`node_detach()`, which clears `su_Attached`, so a reopen would be accepted --
-and a successful open always logs `attached`. The absence of that line is
-evidence that DLG never called `OpenDevice()` again, rather than that the call
-failed. `TR0` reopening repeatedly on the same driver makes the same point.
+The distribution ships **`TL0.startup` and `TR0.Startup` only**, because it
+comes configured for one local and one remote node. Add `TR1` and it will
+happily mount, activate, and serve its first caller -- and then stop, because
+nothing ever frees it. Nothing warns you.
 
-**What DLG thinks is happening.** Re-running `ActivatePort` on a stopped port
-gives:
+**Fix.** Copy `TR0.Startup` once per port, substituting the port name inside
+(the `-p tr0` argument in particular):
 
 ```
-Error: Port is already active
+DLGConfig:Batch/TR1.Startup   ... DLG:FreePort > NIL: -p tr1 -k "BBS"
+DLGConfig:Batch/TR2.Startup   ... DLG:FreePort > NIL: -p tr2 -k "BBS"
+DLGConfig:Batch/TR3.Startup   ... DLG:FreePort > NIL: -p tr3 -k "BBS"
 ```
 
-So ResMan still has the port marked active; it has not noticed that the
-`SetUp` process on that port is gone. `DeactivatePort` on such a port does not
-return at all -- it appears to wait for a port that will never come free -- so
-the obvious watchdog (deactivate, then activate) hangs rather than helping.
+[build_system.py](../tests/host/build_system.py) now generates these from
+`TR0.Startup` for every configured node. With them in place all four nodes
+recycle indefinitely:
 
-**The port lifecycle, from the source and from the running machine.**
-`SetUp` is what waits for carrier on a port. It is never invoked by name
-anywhere in DLG's source, so the only thing that ever starts it is ResMan
-running the command registered by `ActivatePort`. When a call arrives the
-session chain takes over, and `SetUp` exits through `CleanUp()`:
-
-```c
-if (!spawned)      FreePort(port, "Setup");
-exit(s?5:0);
+```
+node 0: detached -> attached    node 1: detached -> attached
+node 2: detached -> attached    node 3: detached -> attached
 ```
 
-`FreePort` is what hands the port back so ResMan can start the next `SetUp`.
-A process dump from the running machine matches: at idle there is one
-`DLG:SetUp` per remote port; during a call the busy port's `SetUp` is replaced
-by `DLG:door`; after the call, `TR0` gets a fresh `SetUp` and the others do
-not.
-
-So the failure is that ResMan does not start the next `SetUp` on those ports.
-Whether `FreePort` is not being reached, or is reached and ResMan does not act
-on it, is not established -- it would need either a careful read of `RM/` or a
-debugger on the Amiga.
-
-**Unresolved.** Why `TR0` is special is not established. Worth noting that
-`Disk1:Install/start.2` only ever mounts and activates `TR0`, with a comment
-saying *"If you add more ports, you will need to add more ActivatePort
-commands for them"* -- so multi-node was a documented-but-less-travelled path.
-A licence limit is one candidate but a weak one: `Handler/Handler/Main.c`
-checks the serial number and includes `<dialog/dead.h>` inside that check, and
-`dead.h` is one of the files missing from the released source, so that part
-cannot be read -- but nothing in the licence terms mentions a node count, and
-`BadFlag` gates output rather than port restarts. Ports here serve their
-first call correctly, which is not what a node limit would look like.
-
-If you know DLG well, this is the place to look -- from the driver's side
-everything needed for the reopen is in place and waiting.
+**How it was diagnosed, and the wrong turn.** The behaviour follows the DLG
+port name rather than the device unit -- swapping `TR0` onto unit 1 and `TR1`
+onto unit 0 moved the surviving node from unit 0 to unit 1. That correctly
+ruled out the driver, but it was over-read as evidence of a defect in DLG.
+It was not: `TR0` was special only because `TR0.Startup` was the one file that
+shipped. The swap was measuring the presence of a config file, not a bug.
 
 ## Licence note on DLG itself
 
