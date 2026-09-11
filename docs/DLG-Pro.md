@@ -241,6 +241,25 @@ node 0: detached -> attached    node 1: detached -> attached
 node 2: detached -> attached    node 3: detached -> attached
 ```
 
+**Checking a setup.** [check_ports.py](../tests/host/check_ports.py) reads
+every `.port` record, follows what it points at, and reports anything missing:
+
+```
+port   device             unit  checks
+TL0    console.device        0  ok
+TR0    serialtcp.device      0  ok
+TR1    serialtcp.device      1  ok
+TR2    serialtcp.device      2  ok
+TR3    serialtcp.device      3  ok
+all ports correctly configured
+```
+
+It checks the session batch exists, that it actually calls `FreePort`, and
+that the `FreePort` names *that* port rather than a copied-and-not-edited one;
+that the globals, modem and display files the port references exist; and that
+the port is in `TPTMountlist` and both mounted and activated in
+`S:DLG-Startup`. Lookups are case-insensitive, as AmigaDOS is.
+
 **How it was diagnosed, and the wrong turn.** The behaviour follows the DLG
 port name rather than the device unit -- swapping `TR0` onto unit 1 and `TR1`
 onto unit 0 moved the surviving node from unit 0 to unit 1. That correctly

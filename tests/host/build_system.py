@@ -345,6 +345,20 @@ def main():
               "DLGConfig/Port/TR3.port", "Libs/dlg.library"):
         print(f"  {'ok ' if os.path.exists(f'{STAGE}/{p}') else 'MISSING'} {p}")
 
+    print("\nPort audit:")
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import check_ports
+        check_ports.ROOT = STAGE
+        check_ports.CFG = os.path.join(STAGE, "DLGConfig")
+        check_ports.PORTDIR = os.path.join(check_ports.CFG, "Port")
+        check_ports.BATCHDIR = os.path.join(check_ports.CFG, "Batch")
+        if check_ports.main() != 0:
+            print("  refusing to build an image with mis-configured ports")
+            return 1
+    except ImportError:
+        print("  (check_ports.py not found, skipping)")
+
     print("\nBuilding the hard drive image:")
     if not build_image():
         return 1
