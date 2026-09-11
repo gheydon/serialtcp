@@ -1,5 +1,8 @@
 # SerialTCP
 
+[![build](https://github.com/gheydon/serialtcp/actions/workflows/build.yml/badge.svg)](https://github.com/gheydon/serialtcp/actions/workflows/build.yml)
+[![licence](https://img.shields.io/github/license/gheydon/serialtcp)](LICENSE)
+
 A virtual serial device for AmigaOS that behaves like a Hayes modem but talks
 TCP. Point BBS software such as DLG Professional at it and it can answer telnet
 calls from the internet without knowing anything has changed.

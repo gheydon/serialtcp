@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Cross-compile and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The m68k-amigaos cross-compiler, in a container so the workflow does
+      # not have to build a toolchain on every run.
+      - name: Cross-compile for AmigaOS
+        run: |
+          docker run --rm -v "$PWD":/work -w /work \
+            amigadev/crosstools:m68k-amigaos \
+            make
+
+      - name: Check the binaries were produced
+        run: |
+          set -e
+          for f in serialtcp.device SerialTCPd SerialTCPStatus SerialTCPStat SerialTest; do
+            test -s "build/$f" || { echo "missing: build/$f"; exit 1; }
+            printf '  %-20s %8d bytes\n' "$f" "$(stat -c%s "build/$f")"
+          done
+          # An Amiga loadable file starts with HUNK_HEADER, 0x000003f3.
+          head -c4 build/serialtcp.device | od -An -tx1 | tr -d ' \n' | grep -q '000003f3' \
+            || { echo "serialtcp.device is not a valid Amiga hunk file"; exit 1; }
+          echo "  serialtcp.device has a valid HUNK_HEADER"
+
+      # The FIFO, telnet codec, AT parser and queue logic are pure logic and
+      # build natively against the stub headers in tests/fake.
+      - name: Unit tests
+        run: make test
