@@ -71,7 +71,9 @@ def main():
             continue
 
         strings = extract(data)
-        tools = [s for s in strings if "=" in s and not s.startswith(("IM1", "IM2"))]
+        # Tool types are not always KEY=VALUE -- bare flags like DONOTWAIT
+        # and STARTPRI are just as valid, so do not filter on "=".
+        tools = [s for s in strings if not s.startswith(("IM1", "IM2"))]
 
         print(f"=== {path} ===")
         if not tools:

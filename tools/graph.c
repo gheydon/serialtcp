@@ -116,6 +116,7 @@ static ULONG mDraw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     const UWORD      *pens;
     LONG              l, t, w, h, r, b;
     LONG              x, i;
+    LONG              prevx = -1, prevy = 0;
 
     DoSuperMethodA(cl, obj, (Msg)msg);
 
@@ -139,8 +140,8 @@ static ULONG mDraw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     SetAPen(rp, pens[MPEN_BACKGROUND]);
     RectFill(rp, l, t, r, b);
 
-    /* Grid: three horizontal rules and a vertical every 20 samples. Quiet
-     * enough to read the shape against, which is the whole point. */
+    /* Grid: quarters horizontally, every 20 samples vertically. Quiet enough
+     * to read the trace against, which is the whole point of having it. */
     SetAPen(rp, pens[MPEN_HALFSHADOW]);
     for (i = 1; i < 4; i++)
     {
@@ -155,34 +156,44 @@ static ULONG mDraw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     }
 
     /*
-     * The series, newest at the right. Each column is filled from the baseline
-     * up, which reads far better at a glance than a bare line.
+     * The trace, newest sample at the right. A line only -- no fill beneath
+     * it, so overlapping detail stays readable and the grid shows through.
+     *
+     * MPEN_FILL rather than MPEN_SHINE: on the standard grey MUI background a
+     * white line nearly disappears, whereas the fill pen is a strong colour
+     * in every scheme.
      */
+    SetAPen(rp, pens[MPEN_FILL]);
     for (x = r; x >= l; x--)
     {
         UWORD age = (UWORD)(r - x);
         LONG  v   = sample_at(d, age);
-        LONG  top;
+        LONG  y;
 
         if (v < 0)
-            break;                      /* no history that far back yet */
-
-        if (v <= 0)
-            continue;                   /* nothing to draw for a zero sample */
+            break;
 
         if ((UWORD)v > d->gd_Max)
             v = d->gd_Max;
 
-        top = b - ((b - t) * v) / (LONG)d->gd_Max;
-        if (top < t)
-            top = t;
+        y = b - ((b - t) * v) / (LONG)d->gd_Max;
+        if (y < t)
+            y = t;
 
-        SetAPen(rp, pens[MPEN_FILL]);
-        RectFill(rp, x, top, x, b);
+        /* Join to the previous sample so the trace is continuous, including
+         * across a run of equal values and down to zero. */
+        if (prevx >= 0)
+        {
+            Move(rp, prevx, prevy);
+            Draw(rp, x, y);
+        }
+        else
+        {
+            WritePixel(rp, x, y);
+        }
 
-        /* A brighter cap makes the trace legible where the fill is flat. */
-        SetAPen(rp, pens[MPEN_SHINE]);
-        WritePixel(rp, x, top);
+        prevx = x;
+        prevy = y;
     }
 
     /* Frame it, so it reads as a panel rather than a hole in the window. */

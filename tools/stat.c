@@ -54,6 +54,14 @@
 #include "statcommon.h"
 #include "graph.h"
 
+/*
+ * MUI 3.8 is muimaster.library 19, and that is what is actually installed on
+ * most Amigas. The SDK header's MUIMASTER_VMIN is 20 (MUI 4 and later), so
+ * using it would refuse to run on 3.8 for no reason -- nothing here needs
+ * anything newer than 3.x. MUI 4 and 5 satisfy 19 as well.
+ */
+#define ST_MUIMASTER_VMIN 19
+
 #define DEFAULT_ROWS   4
 
 /* MUIMasterBase and IntuitionBase are declared by their proto headers. */
@@ -213,32 +221,69 @@ static Object *build_row(int rowIndex, BOOL header)
 static Object *build_table(UWORD nodes)
 {
     struct TagItem *tags;
-    Object         *table;
+    Object         *rows, *header, *scroll;
     ULONG           t = 0;
     UWORD           i;
 
-    tags = (struct TagItem *)AllocVec((nodes + 4) * sizeof(struct TagItem),
+    /* The header stays outside the scrolling area so the column titles
+     * remain visible however far down the list you are. Both use the same
+     * MUIA_FixWidthTxt samples, so they stay lined up. */
+    header = build_row(0, TRUE);
+    if (!header)
+        return NULL;
+
+    tags = (struct TagItem *)AllocVec((nodes + 2) * sizeof(struct TagItem),
                                       MEMF_ANY | MEMF_CLEAR);
     if (!tags)
         return NULL;
 
-    tags[t].ti_Tag    = MUIA_Frame;
-    tags[t++].ti_Data = MUIV_Frame_Group;
-
-    tags[t].ti_Tag    = MUIA_Group_Child;
-    tags[t++].ti_Data = (ULONG)build_row(0, TRUE);
-
     for (i = 0; i < nodes; i++)
     {
+        Object *row = build_row(i, FALSE);
+        if (!row)
+        {
+            FreeVec(tags);
+            return NULL;
+        }
         tags[t].ti_Tag    = MUIA_Group_Child;
-        tags[t++].ti_Data = (ULONG)build_row(i, FALSE);
+        tags[t++].ti_Data = (ULONG)row;
     }
-
     tags[t].ti_Tag = TAG_DONE;
 
-    table = MUI_NewObjectA((CONST_STRPTR)MUIC_Group, tags);
+    rows = MUI_NewObjectA((CONST_STRPTR)MUIC_Group, tags);
     FreeVec(tags);
-    return table;
+    if (!rows)
+        return NULL;
+
+    /*
+     * Scrollable, so a machine with more nodes than fit on screen is still
+     * usable. FreeHoriz is off because the columns are fixed width and
+     * always fit -- a horizontal scrollbar would only ever be in the way.
+     */
+    scroll = ScrollgroupObject,
+        MUIA_Scrollgroup_FreeHoriz, FALSE,
+        MUIA_Scrollgroup_Contents, VirtgroupObject,
+            Child, rows,
+        End,
+    End;
+
+    if (!scroll)
+    {
+        MUI_DisposeObject(rows);
+        return NULL;
+    }
+
+    /*
+     * The heavier vertical weight makes this the part that grows when the
+     * window is resized: more nodes visible is a better use of extra height
+     * than taller graphs.
+     */
+    return VGroup,
+        MUIA_Frame,      MUIV_Frame_Group,
+        MUIA_VertWeight, 300,
+        Child, header,
+        Child, scroll,
+    End;
 }
 
 /*
@@ -266,7 +311,10 @@ static Object *build_graphs(void)
         return HGroup, MUIA_ShowMe, FALSE, End;
     }
 
+    /* Lighter than the node table, so extra window height goes to the list
+     * of nodes rather than to taller graphs. */
     return HGroup,
+        MUIA_VertWeight, 100,
         Child, VGroup,
             MUIA_Frame,      MUIV_Frame_Group,
             MUIA_FrameTitle, "Nodes in use",
@@ -446,10 +494,12 @@ static void refresh_gui(void)
             else if (!snap.queueMax)
                 strcpy(g_LblQueueText, "queueing off");
             else
+                /* Kept short: the panel is only half the window wide, and
+                 * the longer form was clipping. The running total lives on
+                 * the stats line below instead. */
                 snprintf(g_LblQueueText, sizeof(g_LblQueueText),
-                         "%u waiting of %u  (%lu queued so far)",
-                         (unsigned)snap.queued, (unsigned)snap.queueMax,
-                         (unsigned long)snap.queuedCalls);
+                         "%u waiting of %u",
+                         (unsigned)snap.queued, (unsigned)snap.queueMax);
             set(g_LblQueue, MUIA_Text_Contents, g_LblQueueText);
         }
 
@@ -465,19 +515,19 @@ static void refresh_gui(void)
                 char wait[24];
 
                 if (snap.qServed)
-                    snprintf(wait, sizeof(wait), "%lu:%02lus avg",
+                    snprintf(wait, sizeof(wait), "%lu:%02lu",
                              (unsigned long)(snap.qAvgWait / 60),
                              (unsigned long)(snap.qAvgWait % 60));
                 else
                     strcpy(wait, "-");
 
+                /* Kept terse: this sits under a half-width panel, and the
+                 * longer wording was being clipped. */
                 snprintf(g_LblQueueStatsText, sizeof(g_LblQueueStatsText),
-                         "\033bthrough\033n %lu   \033bleft\033n %lu   "
-                         "\033btimeout\033n %lu   \033bno\033n %lu   %s",
+                         "in %lu  thru %lu  left %lu  wait %s",
+                         (unsigned long)snap.queuedCalls,
                          (unsigned long)snap.qServed,
                          (unsigned long)snap.qAbandoned,
-                         (unsigned long)snap.qTimedOut,
-                         (unsigned long)snap.qDeclined,
                          wait);
             }
             else
@@ -838,7 +888,7 @@ int main(int argc, char **argv)
         nodes = MAX_SHOWN;
 
     IntuitionBase = (struct IntuitionBase *)OpenLibrary((CONST_STRPTR)"intuition.library", 37);
-    MUIMasterBase = OpenLibrary((CONST_STRPTR)MUIMASTER_NAME, MUIMASTER_VMIN);
+    MUIMasterBase = OpenLibrary((CONST_STRPTR)MUIMASTER_NAME, ST_MUIMASTER_VMIN);
 
     if (!MUIMasterBase || !IntuitionBase)
     {
