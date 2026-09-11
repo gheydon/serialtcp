@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SerialTCP -- a virtual serial device and modem daemon for AmigaOS.
-# Copyright (C) 2026 Gordon Heydon
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
