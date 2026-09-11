@@ -157,37 +157,30 @@ Queue: 1 waiting of 8 places, 14 joined in total
 
 ### As a window — `SerialTCPStat`
 
-`SerialTCPStat` opens a MUI window with one row per node, two scrolling history
-graphs, and the queue figures:
+![SerialTCPStat running on AmigaOS 3.2](docs/images/serialtcpstat.png)
 
-```
-Port 23   Up 47m   Calls 12   Busy 1   Queue 2/8
-
-Node  State     Caller                 Baud    Time      In      Out
-0     ONLINE    203.0.113.44:51234     38400   12:41     84K     1.2M
-1     waiting   -                      38400   -         0       0
-2     RINGING   198.51.100.9:44012     38400   ring 2    0       0
-3     closed    -                      -       -         0       0
-
-+-- Nodes in use -----------+  +-- Queue -------------------+
-| 3 of 4 busy               |  | 2 waiting of 8             |
-|          ___              |  |                            |
-|      ___/   \__/‾‾\_      |  |            __/‾‾\_         |
-+---------------------------+  | through 9  left 2  ...     |
-                               +----------------------------+
-```
-
-The graphs hold two minutes of history at the one-second refresh, and rescale
-themselves if the node count or queue size changes.
-
-The queue line accounts for everyone who joined: **through** (put onto a node),
-**left** (hung up rather than wait), **timeout** (gave up per `queue-timeout`),
-**no** (declined at the `ask` prompt or never answered), plus the average wait
-for those who got through. A high **left** count means your queue is longer
-than callers are willing to sit through.
+One row per node, two scrolling history graphs, and the queue figures. Needs
+**MUI 3.8 or later** (`muimaster.library` 19+); without it the program prints
+the text report instead of refusing to start.
 
 `closed` means no BBS node has that unit open — usually that node just is not
-running. A node in that state will never be given a call.
+running. A node in that state will never be given a call, and a unit reserved
+to its own listener with `listen-node` shows as `dial-out`.
+
+The node list scrolls when there are more nodes than fit, with the column
+header staying put, and it is the part that grows when you resize the window.
+The graphs hold two minutes of history at the one-second refresh and rescale
+themselves if the node count or queue size changes.
+
+The queue line accounts for everyone who joined: **in** (joined), **thru** (put
+onto a node), **left** (hung up rather than wait), and the average wait for
+those who got through. A high **left** count means your queue is longer than
+callers are willing to sit through.
+
+The window also has **Start**, **Stop** and **Restart**. Stop asks for
+confirmation first if any node still has a caller on it, so a stray click
+cannot cut people off; if you confirm, it forces the shutdown. Use
+`-d <command>` if the daemon is not simply `SerialTCPd` on your path.
 
 `SerialTCPStat -c` prints the same text report as `SerialTCPStatus`; both share
 one implementation, so they cannot drift apart.
