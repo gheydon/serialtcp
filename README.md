@@ -174,7 +174,8 @@ Queue: 1 waiting of 8 places, 14 joined in total
 
 ![SerialTCPStat running on AmigaOS 3.2](docs/images/serialtcpstat.png)
 
-One row per node, two scrolling history graphs, and the queue figures. Needs
+One row per node, the queue figures, and two scrolling history graphs: nodes in
+use with the bytes per second in and out beside it, and queue depth. Needs
 **MUI 3.8 or later** (`muimaster.library` 19+); without it the program prints
 the text report instead of refusing to start.
 
