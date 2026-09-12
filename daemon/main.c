@@ -31,6 +31,8 @@
 #include <exec/ports.h>
 #include <exec/execbase.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
+#include <dos/dostags.h>
 #include <devices/timer.h>
 
 #include <proto/exec.h>
@@ -455,6 +457,128 @@ static void nodes_destroy(void)
     g_Nodes = NULL;
 }
 
+/* ------------------------------------------------------------------ */
+/* Detaching from the shell                                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A daemon that holds on to the Shell it was launched from is a nuisance: the
+ * window cannot be used for anything else and closing it kills the BBS.  So
+ * unless told otherwise we relaunch ourselves as a background process and let
+ * the foreground copy exit straight away, which is what the user expects from
+ * typing the command by hand.
+ *
+ * Re-running the command is deliberate.  The obvious alternative -- spawning a
+ * process with CreateNewProc() and exiting -- does not work here, because the
+ * Shell unloads the command's code the moment the foreground copy returns, and
+ * the background copy would be executing memory that had just been freed.
+ */
+
+/* Case-insensitive compare, so both DETACH and detach are accepted. */
+static BOOL arg_is(const char *s, const char *word)
+{
+    while (*s && *word)
+    {
+        char a = *s++, b = *word++;
+        if (a >= 'a' && a <= 'z') a = (char)(a - 32);
+        if (b >= 'a' && b <= 'z') b = (char)(b - 32);
+        if (a != b)
+            return FALSE;
+    }
+    return *s == '\0' && *word == '\0';
+}
+
+/*
+ * Where our own executable lives.  GetProgramName() gives the name as it was
+ * typed, which may be a bare command found on the path, so it is resolved
+ * against GetProgramDir() to get something the background Shell can find
+ * regardless of what its own path and current directory are.
+ */
+static BOOL program_path(char *buf, LONG len)
+{
+    char name[128];
+    BPTR dir;
+
+    if (!GetProgramName((STRPTR)name, sizeof(name)))
+        return FALSE;
+
+    dir = GetProgramDir();
+    if (!dir)
+    {
+        strncpy(buf, name, len - 1);
+        buf[len - 1] = '\0';
+        return TRUE;
+    }
+
+    if (!NameFromLock(dir, (STRPTR)buf, len))
+        return FALSE;
+
+    return AddPart((STRPTR)buf, (CONST_STRPTR)FilePart((CONST_STRPTR)name), len) ? TRUE : FALSE;
+}
+
+/*
+ * Returns TRUE if a background copy has been started and this process should
+ * exit quietly.  FALSE means carry on and run the daemon here.
+ */
+static BOOL detach_self(const char *conf)
+{
+    struct Process              *me = (struct Process *)FindTask(NULL);
+    struct CommandLineInterface *cli;
+    char  path[256];
+    char  cmd[400];
+    BPTR  in, out;
+    LONG  rc;
+
+    /* Started from Workbench: there is no Shell to give back. */
+    if (!me->pr_CLI)
+        return FALSE;
+
+    /* Already in the background -- launched with Run, or from a script that
+     * did.  Detaching again would just add a pointless second process. */
+    cli = (struct CommandLineInterface *)BADDR(me->pr_CLI);
+    if (cli->cli_Background)
+        return FALSE;
+
+    if (!program_path(path, sizeof(path)))
+    {
+        printf("SerialTCPd: cannot work out my own path, staying in the shell\n");
+        return FALSE;
+    }
+
+    snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" NODETACH", path, conf);
+
+    in  = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+    out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+    if (!in || !out)
+    {
+        if (in)  Close(in);
+        if (out) Close(out);
+        printf("SerialTCPd: cannot open NIL:, staying in the shell\n");
+        return FALSE;
+    }
+
+    /* SYS_Asynch hands ownership of both handles to the new process, which
+     * closes them when it exits -- so they must not be closed here unless the
+     * call itself failed. */
+    rc = SystemTags((CONST_STRPTR)cmd,
+                    SYS_Input,  (Tag)in,
+                    SYS_Output, (Tag)out,
+                    SYS_Asynch, (Tag)TRUE,
+                    NP_Name,    (Tag)"SerialTCPd",
+                    TAG_DONE);
+
+    if (rc == -1)
+    {
+        Close(in);
+        Close(out);
+        printf("SerialTCPd: could not start a background process, "
+               "staying in the shell\n");
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
 static ULONG memory_estimate(void)
 {
     return (ULONG)sizeof(struct STNode) * g_Config.c_Nodes
@@ -473,19 +597,39 @@ int main(int argc, char **argv)
     LONG        nfds, rc;
     struct timeval tv;
     UWORD       i;
+    int         a;
+    BOOL        noDetach = FALSE;
 
     (void)verstag;
 
-    if (argc > 1)
+    for (a = 1; a < argc; a++)
     {
-        if (!strcmp(argv[1], "?") || !strcmp(argv[1], "-h") || !strcmp(argv[1], "HELP"))
+        if (!strcmp(argv[a], "?") || arg_is(argv[a], "-h") || arg_is(argv[a], "HELP"))
         {
             printf("%s\n", VERSION_STRING);
-            printf("Usage: SerialTCPd [configfile]\n");
-            printf("Default config: %s\n", conf);
+            printf("Usage: SerialTCPd [configfile] [NODETACH]\n");
+            printf("  configfile  where to read settings from (default %s)\n", conf);
+            printf("  NODETACH    stay in this shell instead of going into\n"
+                   "              the background\n");
             return 0;
         }
-        conf = argv[1];
+
+        if (arg_is(argv[a], "NODETACH") || arg_is(argv[a], "FOREGROUND"))
+            noDetach = TRUE;
+        else
+            conf = argv[a];
+    }
+
+    /*
+     * Do this before anything is opened or allocated: the background copy
+     * starts from scratch, so there is nothing here worth setting up first.
+     */
+    if (!noDetach && detach_self(conf))
+    {
+        printf("SerialTCPd: running in the background. "
+               "Use SerialTCPStatus to see what it is doing,\n"
+               "             or SerialTCPd NODETACH to keep it in this shell.\n");
+        return 0;
     }
 
     config_defaults();

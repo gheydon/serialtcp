@@ -101,8 +101,19 @@ run. Then start the daemon after your TCP stack is up:
 SerialTCPd
 ```
 
-It stays in the foreground and logs what it is doing. Ctrl-C stops it. To run
-it from `S:User-Startup`, use `Run >NIL: SerialTCPd`.
+It puts itself into the background and gives the shell straight back, so it is
+safe to call from `S:User-Startup` without `Run`. Watch it with
+`SerialTCPStatus`, and stop it from `SerialTCPStat` or by sending the process a
+break.
+
+If you would rather keep it in the shell — to watch the log scroll past while
+you are setting it up, and stop it with Ctrl-C:
+
+```
+SerialTCPd NODETACH
+```
+
+A daemon started with `Run` is already in the background and is left alone.
 
 ## Pointing a BBS at it
 

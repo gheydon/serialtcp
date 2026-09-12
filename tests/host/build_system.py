@@ -301,16 +301,31 @@ def stage_config():
           "EndCLI >NIL:\n")
 
     # User-Startup: the daemon must be up before DLG opens any unit.
+    # Nothing here keeps the startup shell: SerialTCPd puts itself into the
+    # background, and DLG's startup is launched with Run, so the boot carries
+    # straight on to LoadWB.
     write(f"{STAGE}/S/User-Startup",
-          "; --- SerialTCP + DLG -------------------------------------------\n"
+          "; --- MUI ---------------------------------------------------------\n"
+          "Assign >NIL: MUI:  SYS:MUI\n"
+          "Assign >NIL: LIBS: MUI:Libs ADD\n"
+          "; -----------------------------------------------------------------\n\n"
+          "; --- SerialTCP + DLG ---------------------------------------------\n"
           "; Work: is a separate drive holding the SerialTCP build, its config\n"
           "; and its logs, so they can be changed without touching the system.\n"
-          "Assign >NIL: DEVS: Work: ADD\n"
-          "Run >Work:daemon-out.txt <NIL: Work:SerialTCPd Work:serialtcp.conf\n"
+          "Assign >NIL: DEVS: Work: ADD\n\n"
+          "; No Run: the daemon detaches itself and hands the shell back.\n"
+          "Work:SerialTCPd Work:serialtcp.conf\n"
+          "Wait 3\n\n"
+          "Run >NIL: <NIL: Execute Work:StatusLoop\n\n"
+          "; Mounting and activating five ports takes the better part of a\n"
+          "; minute, so DLG comes up in the background as well.  Its output\n"
+          "; goes to NIL:, not to a file on Work: -- pointed at the host\n"
+          "; directory drive, DLG-Startup stalled before activating a port.\n"
+          "Run >NIL: <NIL: Execute S:DLG-Startup\n\n"
+          "; The MUI status window, on the Workbench screen.\n"
           "Wait 3\n"
-          "Run >NIL: <NIL: Execute Work:StatusLoop\n"
-          "Execute >Work:dlg-out.txt S:DLG-Startup\n"
-          "; ---------------------------------------------------------------\n")
+          "Run >NIL: <NIL: Work:SerialTCPStat\n"
+          "; -----------------------------------------------------------------\n")
 
     print(f"  config: {NODES} ports on {DEVICE} units 0..{NODES-1}, "
           f"mountlist, DLG-Startup, User-Startup")
