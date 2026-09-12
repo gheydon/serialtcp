@@ -401,8 +401,10 @@ struct MUI_CustomClass *graph_create_class(void)
                                  sizeof(struct GraphData), (APTR)dispatcher);
 }
 
-void graph_delete_class(struct MUI_CustomClass *mcc)
+BOOL graph_delete_class(struct MUI_CustomClass *mcc)
 {
-    if (mcc)
-        MUI_DeleteCustomClass(mcc);
+    if (!mcc)
+        return TRUE;
+
+    return MUI_DeleteCustomClass(mcc) ? TRUE : FALSE;
 }

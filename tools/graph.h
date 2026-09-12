@@ -51,6 +51,6 @@ struct MUIP_Graph_Push
  */
 
 struct MUI_CustomClass *graph_create_class(void);
-void                    graph_delete_class(struct MUI_CustomClass *mcc);
+BOOL                    graph_delete_class(struct MUI_CustomClass *mcc);
 
 #endif

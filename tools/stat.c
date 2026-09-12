@@ -897,19 +897,6 @@ static void usage(void)
 }
 
 
-/*
- * libnix checks for Ctrl-C inside its own I/O calls and exits on the spot if
- * it finds one.  That is the right thing for a shell command and quite wrong
- * here: it would tear the process down in the middle of MUI, leaving the
- * custom class and the application object behind, and the machine gurus with
- * a corrupt memory list soon after.  The event loop below watches for Ctrl-C
- * itself and shuts down in order, so this stub takes the automatic check out
- * of the picture.
- */
-void __chkabort(void)
-{
-}
-
 int main(int argc, char **argv)
 {
     struct Snapshot probe;
@@ -960,7 +947,11 @@ int main(int argc, char **argv)
 
     rc = run_gui(nodes);
 
-    graph_delete_class(g_GraphClass);
+    /* Fails if any object of the class is somehow still alive, which would
+     * leave MUI holding a dispatcher pointer into code about to be unloaded.
+     * Nothing can be done about it here, but it must not pass unnoticed. */
+    if (!graph_delete_class(g_GraphClass))
+        printf("SerialTCPStat: warning -- the graph class could not be freed\n");
     g_GraphClass = NULL;
 
     CloseLibrary(MUIMasterBase);
