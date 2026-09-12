@@ -853,6 +853,20 @@ static void usage(void)
     printf("  -d command  command used to start the daemon (default '%s')\n", DAEMON_COMMAND);
 }
 
+
+/*
+ * libnix checks for Ctrl-C inside its own I/O calls and exits on the spot if
+ * it finds one.  That is the right thing for a shell command and quite wrong
+ * here: it would tear the process down in the middle of MUI, leaving the
+ * custom class and the application object behind, and the machine gurus with
+ * a corrupt memory list soon after.  The event loop below watches for Ctrl-C
+ * itself and shuts down in order, so this stub takes the automatic check out
+ * of the picture.
+ */
+void __chkabort(void)
+{
+}
+
 int main(int argc, char **argv)
 {
     struct Snapshot probe;
