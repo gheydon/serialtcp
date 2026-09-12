@@ -267,6 +267,56 @@ ruled out the driver, but it was over-read as evidence of a defect in DLG.
 It was not: `TR0` was special only because `TR0.Startup` was the one file that
 shipped. The swap was measuring the presence of a config file, not a bug.
 
+## A system information door — `DLGSysInfo`
+
+`DLGSysInfo` shows a caller what the machine and the BBS are doing: CPU, FPU,
+chipset, AmigaOS and Workbench versions, time since boot, Chip and Fast memory,
+which nodes are active and on which device, how many are in use, and the
+SerialTCP daemon's own figures. A caller on a SerialTCP node also sees the
+address they are calling from — their own, never anyone else's.
+
+A DLG door needs no framework: DLG's TPT-Handler is the console for the
+process, so ordinary output goes down the line. The door is therefore also a
+plain Shell command, and gives the same report run by hand.
+
+DLG ships an optional `DLGConfig:Batch/SystemInfo.batch` for this, holding three
+AmigaDOS commands (`Avail`, `Status`, `Info`). No menu runs it out of the box —
+you add the menu entry yourself. Replace its contents with the door:
+
+```
+; Run from the System Information menu entry.
+C:DLGSysInfo
+```
+
+Then give it a menu entry with DLG's sysop menu editor, `DLG:SysMenu`, which
+edits the menus in `DLGConfig:Menu/`. On the `MAIN` menu add:
+
+| Field       | Value                                 |
+|-------------|---------------------------------------|
+| Letter      | any free one — the stock main menu uses `M F P C O B U S D G ? H`, so `I` is free |
+| Description | `System Information`                  |
+| Program     | `DLGConfig:Batch/SystemInfo.batch`    |
+| Type        | Batch                                 |
+| Levels      | 1–255                                 |
+
+The stock *Chat With Sysop* entry (`C`) is the model to copy. It is also a
+Batch entry for levels 1–255, with only the `BCPEND` flag set.
+
+Where the information comes from, and what happens without it:
+
+| Section    | Source                                             | Without it                         |
+|------------|----------------------------------------------------|------------------------------------|
+| System     | Exec, graphics.library, version.library            | always available                   |
+| Memory     | `AvailMem()`                                       | always available                   |
+| BBS nodes  | dlg.library `ListPorts()`/`GetDevName()`, and each port's `DLGConfig:Port/<port>.port` | says dlg.library or ResMan is missing |
+| Node state | SerialTCPd                                         | node table shows no state          |
+
+It calls dlg.library through its function offsets rather than the DLG SDK, so
+it builds from this repository alone. Only calls that cannot block or alter a
+port are used. `TCheckCarrier()` is avoided because it ends the session on a
+port with no carrier, and `TDevQuery()` because it waits on a reply from each
+port's handler.
+
 ## Licence note on DLG itself
 
 DLG Professional was released as freeware by Jeff Grimmett, with source, in

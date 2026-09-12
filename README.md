@@ -76,14 +76,16 @@ make test
 
 ## Installing
 
-Copy all three together — they share a protocol version and refuse to talk to a
-mismatched build rather than misbehaving.
+Copy them together — they share a protocol version and refuse to talk to a
+mismatched build rather than misbehaving. `DLGSysInfo` is only needed if you run
+DLG Professional.
 
 ```
 copy build/serialtcp.device DEVS:
 copy build/SerialTCPd       C:
 copy build/SerialTCPStatus  C:
 copy build/SerialTCPStat    C:
+copy build/DLGSysInfo       C:
 copy serialtcp.conf         S:
 ```
 
@@ -120,7 +122,9 @@ A daemon started with `Run` is already in the background and is left alone.
 Anywhere the BBS asks for a serial device, give it `serialtcp.device` and a
 unit number, one unit per node. Node 1 gets unit 0, node 2 unit 1, and so on.
 
-For DLG Professional specifically, see [docs/DLG-Pro.md](docs/DLG-Pro.md).
+For DLG Professional specifically, see [docs/DLG-Pro.md](docs/DLG-Pro.md). It also
+covers `DLGSysInfo`, a door that shows callers the machine, its memory, which
+nodes are in use and what SerialTCP is doing.
 
 The BBS should be configured as if for a real modem: let it send its init
 string, let it wait for `RING`, let it answer. All of that works. Carrier

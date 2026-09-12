@@ -39,10 +39,11 @@ DAEMON_OBJS = $(BUILD)/main.o $(BUILD)/node.o $(BUILD)/net.o \
 STAT_OBJS   = $(BUILD)/stat.o $(BUILD)/graph.o $(BUILD)/statcommon.o
 CLI_OBJS    = $(BUILD)/statcli.o $(BUILD)/statcommon.o
 SERTEST_OBJS= $(BUILD)/sertest.o
+SYSINFO_OBJS= $(BUILD)/sysinfo.o $(BUILD)/statcommon.o
 
 TARGETS = $(BUILD)/serialtcp.device $(BUILD)/SerialTCPd \
           $(BUILD)/SerialTCPStat $(BUILD)/SerialTCPStatus \
-          $(BUILD)/SerialTest
+          $(BUILD)/SerialTest $(BUILD)/DLGSysInfo
 
 all: $(BUILD) $(TARGETS)
 
@@ -82,6 +83,10 @@ $(BUILD)/SerialTCPStatus: $(CLI_OBJS)
 # Stand-in BBS node, for smoke-testing the device without a real BBS.
 $(BUILD)/SerialTest: $(SERTEST_OBJS)
 	$(CC) $(APP_LDFLAGS) -o $@ $(SERTEST_OBJS) -lamiga
+
+# DLG door: system and BBS status for the caller. Also runs from a Shell.
+$(BUILD)/DLGSysInfo: $(SYSINFO_OBJS)
+	$(CC) $(APP_LDFLAGS) -o $@ $(SYSINFO_OBJS) -lamiga
 
 # ---- native unit tests --------------------------------------------------
 #

@@ -327,6 +327,13 @@ def stage_config():
           "Run >NIL: <NIL: Work:SerialTCPStat\n"
           "; -----------------------------------------------------------------\n")
 
+    # DLG ships SystemInfo.batch as an optional extra -- three AmigaDOS
+    # commands, run by no menu until one is added. DLGSysInfo replaces all
+    # three and adds the node and SerialTCP state.
+    write(f"{STAGE}/DLGConfig/Batch/SystemInfo.batch",
+          "; Run from the System Information menu entry.\n"
+          "Work:DLGSysInfo\n")
+
     print(f"  config: {NODES} ports on {DEVICE} units 0..{NODES-1}, "
           f"mountlist, DLG-Startup, User-Startup")
 
