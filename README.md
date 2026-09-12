@@ -290,10 +290,12 @@ so `nodes 2` really does cost half of `nodes 4`.
 
 ## Known limitations
 
-- **DNS lookups block.** `bsdsocket.library` has no portable asynchronous
-  resolver, so `ATDT somehostname` stalls every node until the lookup finishes.
-  Dialling an IP address directly does not block. Inbound calls, which is what
-  a BBS actually does, are unaffected.
+- **DNS lookups need the resolver process.** `bsdsocket.library` has no
+  asynchronous resolver, so `gethostbyname()` runs in a process of its own and
+  the main loop waits on its reply like any other signal. If that process
+  cannot be started the daemon says so at startup and looks names up in line
+  instead, which does stall every node for the duration. Dialling an IP address
+  directly never looks anything up.
 - **No rate limiting.** The `answer-baud` figure is cosmetic; data moves as
   fast as the network allows regardless of what the BBS thinks the speed is.
 - **The daemon must outlive the BBS.** If you kill `SerialTCPd` while a BBS has

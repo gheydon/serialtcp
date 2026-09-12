@@ -34,7 +34,8 @@ DEV_OBJS = $(BUILD)/device.o
 
 DAEMON_OBJS = $(BUILD)/main.o $(BUILD)/node.o $(BUILD)/net.o \
               $(BUILD)/atcmd.o $(BUILD)/telnet.o $(BUILD)/config.o \
-              $(BUILD)/util.o $(BUILD)/fifo.o $(BUILD)/queue.o $(BUILD)/qutil.o
+              $(BUILD)/util.o $(BUILD)/fifo.o $(BUILD)/queue.o $(BUILD)/qutil.o \
+              $(BUILD)/resolve.o
 
 STAT_OBJS   = $(BUILD)/stat.o $(BUILD)/graph.o $(BUILD)/statcommon.o
 CLI_OBJS    = $(BUILD)/statcli.o $(BUILD)/statcommon.o

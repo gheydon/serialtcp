@@ -188,6 +188,9 @@ static UWORD map_state(struct STNode *n)
     case NS_DETACHED: return STS_DETACHED;
     case NS_COMMAND:  return STS_IDLE;
     case NS_DIALING:  return STS_DIALING;
+    /* A lookup is the first half of dialling; the client has no separate
+     * state for it and does not need one. */
+    case NS_RESOLVING: return STS_DIALING;
     case NS_RINGING:  return STS_RINGING;
     case NS_ONLINE:   return STS_ONLINE;
     case NS_ESCAPED:  return STS_ESCAPED;
@@ -344,6 +347,7 @@ static UWORD active_nodes(void)
         case NS_ESCAPED:
         case NS_RINGING:
         case NS_DIALING:
+        case NS_RESOLVING:
             n++;
             break;
         default:
@@ -658,6 +662,14 @@ int main(int argc, char **argv)
         return 20;
     }
 
+    /*
+     * Not fatal: without it names are looked up in line, which blocks every
+     * node while it happens.  Say so rather than degrading silently.
+     */
+    if (!resolver_start())
+        log_printf("WARNING: no resolver process -- name lookups will block "
+                   "every node while they run");
+
     if (!nodes_create())
     {
         log_printf("FATAL: out of memory allocating %u nodes", (unsigned)g_Config.c_Nodes);
@@ -756,7 +768,8 @@ int main(int argc, char **argv)
     log_printf("ready -- open %s unit 0..%u, or press Ctrl-C to stop",
                ST_DEVICE_NAME, (unsigned)(g_Config.c_Nodes - 1));
 
-    waitmask = (1UL << g_PortSig) | (1UL << g_IoSig) | SIGBREAKF_CTRL_C;
+    waitmask = (1UL << g_PortSig) | (1UL << g_IoSig) | SIGBREAKF_CTRL_C
+             | resolver_sigmask();
 
     while (!g_Quit)
     {
@@ -797,6 +810,10 @@ int main(int argc, char **argv)
 
         if (sigs & (1UL << g_PortSig))
             handle_port_messages();
+
+        /* Cheap on an empty port, and calling it every pass means a reply can
+         * never be left sitting there because a signal was coalesced away. */
+        resolver_handle_replies();
 
         /*
          * Always sweep every node.  Exec coalesces signals, so one wakeup can
@@ -839,6 +856,10 @@ cleanup:
          * reply, or its sender waits forever. */
         handle_port_messages();
     }
+
+    /* Before the nodes go: outstanding lookups point at them, and the
+     * resolver has to give every request back before it can be freed. */
+    resolver_stop();
 
     queue_cleanup();
     nodes_destroy();

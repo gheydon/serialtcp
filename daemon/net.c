@@ -246,51 +246,18 @@ static BOOL split_target(const char *target, char *host, ULONG hostsize, UWORD *
     return TRUE;
 }
 
-void node_dial(struct STNode *n, const char *target)
+/* Open the connection, once there is an address to open it to. */
+static void dial_connect(struct STNode *n, ULONG addr, const char *host, UWORD port)
 {
     struct sockaddr_in sa;
-    struct hostent    *he;
-    char               host[128];
-    UWORD              port;
     LONG               s;
     LONG               on = 1;
     LONG               rc;
 
-    if (n->n_Sock >= 0)
-    {
-        node_result(n, RC_ERROR, 0);
-        return;
-    }
-
-    if (!split_target(target, host, sizeof(host), &port))
-    {
-        node_result(n, RC_ERROR, 0);
-        return;
-    }
-
     memset(&sa, 0, sizeof(sa));
-    sa.sin_family = AF_INET;
-    sa.sin_port   = htons(port);
-
-    sa.sin_addr.s_addr = inet_addr((STRPTR)host);
-    if (sa.sin_addr.s_addr == (ULONG)-1)
-    {
-        /*
-         * Name lookup.  This is the one genuinely blocking call in the daemon:
-         * bsdsocket offers no portable asynchronous resolver, so a slow DNS
-         * server stalls every node for the duration.  Dialling out is rare in
-         * a BBS setup (it is the inbound path that matters), so this is a
-         * documented limitation rather than a hidden one.
-         */
-        he = gethostbyname((STRPTR)host);
-        if (!he || !he->h_addr_list || !he->h_addr_list[0])
-        {
-            log_printf("node %lu: cannot resolve '%s'", (unsigned long)n->n_Num, host);
-            node_result(n, RC_NO_DIALTONE, 0);
-            return;
-        }
-        memcpy(&sa.sin_addr, he->h_addr_list[0], sizeof(sa.sin_addr));
-    }
+    sa.sin_family      = AF_INET;
+    sa.sin_port        = htons(port);
+    sa.sin_addr.s_addr = addr;
 
     s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0)
@@ -326,6 +293,94 @@ void node_dial(struct STNode *n, const char *target)
     n->n_TimerActive = TRUE;
 
     log_printf("node %lu: dialling %s", (unsigned long)n->n_Num, n->n_PeerName);
+}
+
+void node_dial(struct STNode *n, const char *target)
+{
+    char  host[128];
+    UWORD port;
+    ULONG addr;
+
+    if (n->n_Sock >= 0 || n->n_Resolve)
+    {
+        node_result(n, RC_ERROR, 0);
+        return;
+    }
+
+    if (!split_target(target, host, sizeof(host), &port))
+    {
+        node_result(n, RC_ERROR, 0);
+        return;
+    }
+
+    /* A literal address needs no lookup at all, which is the common case for
+     * a dial string out of a BBS mailer. */
+    addr = inet_addr((STRPTR)host);
+    if (addr != (ULONG)-1)
+    {
+        dial_connect(n, addr, host, port);
+        return;
+    }
+
+    /*
+     * Hand the name to the resolver process and return to the main loop.  The
+     * node waits in NS_RESOLVING under the same S7 timeout a dial gets, so a
+     * DNS server that never answers costs this node its dial and costs the
+     * other nodes nothing.
+     */
+    if (resolve_begin(n, host, port))
+    {
+        n->n_State = NS_RESOLVING;
+        snprintf(n->n_PeerName, sizeof(n->n_PeerName), "%s:%u", host, (unsigned)port);
+
+        st_gettime(&n->n_Timer);
+        n->n_TimerActive = TRUE;
+
+        log_printf("node %lu: looking up %s", (unsigned long)n->n_Num, host);
+        return;
+    }
+
+    /*
+     * No resolver process: look the name up here instead.  This blocks every
+     * node for the duration, which is why the resolver exists, but a daemon
+     * that cannot dial out at all would be worse.
+     */
+    {
+        struct hostent *he = gethostbyname((STRPTR)host);
+
+        if (!he || !he->h_addr_list || !he->h_addr_list[0])
+        {
+            log_printf("node %lu: cannot resolve '%s'", (unsigned long)n->n_Num, host);
+            node_result(n, RC_NO_DIALTONE, 0);
+            return;
+        }
+
+        memcpy(&addr, he->h_addr_list[0], sizeof(addr));
+        dial_connect(n, addr, host, port);
+    }
+}
+
+/* The resolver has answered.  Called from the main loop, never from the
+ * resolver process itself. */
+void node_dial_resolved(struct STNode *n, BOOL ok, ULONG addr,
+                        const char *host, UWORD port)
+{
+    n->n_TimerActive = FALSE;
+
+    /* The caller hung up, or the unit was closed, while we were looking. */
+    if (n->n_State != NS_RESOLVING)
+        return;
+
+    n->n_State = NS_COMMAND;
+
+    if (!ok)
+    {
+        log_printf("node %lu: cannot resolve '%s'", (unsigned long)n->n_Num, host);
+        node_result(n, RC_NO_DIALTONE, 0);
+        return;
+    }
+
+    dial_connect(n, addr, host, port);
 }
 
 /* Called when a dialling socket becomes writable, or the timeout expires. */
@@ -500,6 +555,24 @@ LONG net_build_fds(APTR readfds, APTR writefds)
     for (u = 0; u < g_Config.c_Nodes; u++)
     {
         struct STNode *n = &g_Nodes[u];
+
+        /* A node waiting on a name has no socket yet, so it has to be checked
+         * before the socket test below sends us past it. */
+        if (n->n_State == NS_RESOLVING)
+        {
+            if (n->n_TimerActive &&
+                st_elapsed_ms(&n->n_Timer) >= (LONG)n->n_SReg[7] * 1000)
+            {
+                log_printf("node %lu: lookup of %s timed out",
+                           (unsigned long)n->n_Num, n->n_PeerName);
+                resolve_cancel(n);
+                n->n_TimerActive = FALSE;
+                n->n_State       = NS_COMMAND;
+                node_set_status(n, ST_STATUS_READY);
+                node_result(n, RC_NO_DIALTONE, 0);
+            }
+            continue;
+        }
 
         if (n->n_Sock < 0)
             continue;

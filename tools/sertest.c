@@ -26,7 +26,11 @@
  * Carrier is read exactly the way DLG Pro reads it -- io_Status bit 5, active
  * low -- so if this reports carrier correctly, DLG will too.
  *
- * Usage: SerialTest [unit] [device]
+ * Usage: SerialTest [unit] [device] [dial-target]
+ *
+ * With a dial target it sends ATDT<target> once the unit is open and then
+ * reports whatever the modem says back, which is how the outbound path and
+ * the name resolver get exercised without a BBS in the way.
  */
 
 #include <exec/types.h>
@@ -136,6 +140,7 @@ static void write_str(const char *s)
 int main(int argc, char **argv)
 {
     const char *devname = "serialtcp.device";
+    const char *dial    = NULL;
     ULONG       unit    = 0;
     UBYTE       buf[BUFSIZE];
     BOOL        hadCarrier = FALSE;
@@ -151,6 +156,7 @@ int main(int argc, char **argv)
 
     if (argc > 1) unit    = (ULONG)atoi(argv[1]);
     if (argc > 2) devname = argv[2];
+    if (argc > 3) dial    = argv[3];
 
     printf("SerialTest: opening %s unit %lu\n", devname, (unsigned long)unit);
 
@@ -163,6 +169,15 @@ int main(int argc, char **argv)
     query(&status);
     printf("opened OK. io_Status = 0x%04x, carrier = %s\n",
            (unsigned)status, carrier(status) ? "YES" : "no");
+    if (dial)
+    {
+        char cmd[128];
+
+        snprintf(cmd, sizeof(cmd), "ATDT%s\r", dial);
+        printf("Dialling %s\n", dial);
+        write_str(cmd);
+    }
+
     printf("Waiting for a call. Press Ctrl-C to stop.\n");
 
     for (;;)

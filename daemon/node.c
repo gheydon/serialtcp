@@ -239,6 +239,9 @@ void node_online(struct STNode *n, LONG sock, const char *peer, BOOL server)
 
 void node_hangup(struct STNode *n, BOOL sendNoCarrier)
 {
+    /* A name lookup still in flight is no longer wanted by anyone. */
+    resolve_cancel(n);
+
     if (n->n_Sock >= 0)
     {
         CloseSocket(n->n_Sock);

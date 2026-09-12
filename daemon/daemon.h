@@ -169,8 +169,11 @@ enum NodeState
     NS_DIALING,        /* outbound connect() in flight                     */
     NS_RINGING,        /* inbound call waiting to be answered              */
     NS_ONLINE,         /* data passes between application and socket       */
-    NS_ESCAPED         /* +++ seen: command mode, carrier still up         */
+    NS_ESCAPED,        /* +++ seen: command mode, carrier still up         */
+    NS_RESOLVING       /* dial-out: a name lookup is with the resolver     */
 };
+
+struct ResolveReq;
 
 struct STNode
 {
@@ -195,6 +198,9 @@ struct STNode
 
     enum NodeState   n_State;
     LONG             n_Sock;           /* -1 when no socket                */
+
+    /* Non-NULL while a name lookup for this node is with the resolver. */
+    struct ResolveReq *n_Resolve;
 
     /* Buffers are allocated once at startup, sized by config.  Storing them
      * as pointers rather than inline arrays is what keeps struct STNode small
@@ -456,8 +462,46 @@ void node_reply_text(struct STNode *n, const char *s);
 void at_reset(struct STNode *n);
 void at_feed(struct STNode *n, const UBYTE *data, ULONG len);
 
+/* ------------------------------------------------------------------ */
+/* Name resolution (resolve.c)                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * gethostbyname() is the one call in the daemon with no non-blocking form, so
+ * it runs in a process of its own and the main loop waits on the reply the
+ * same way it waits on everything else.  Without this a slow DNS server
+ * freezes every node -- including callers already online -- for as long as the
+ * lookup takes.
+ *
+ * The request is allocated per lookup rather than kept per node: dialling out
+ * is rare, and nothing should be paying for it while nobody is dialling.
+ */
+struct ResolveReq
+{
+    struct Message   rr_Msg;
+    struct STNode   *rr_Node;      /* NULL once the node has given up on it */
+    UWORD            rr_Port;      /* carried through so the reply can dial */
+    BOOL             rr_Quit;      /* shutdown request, not a lookup        */
+    BOOL             rr_Ok;
+    ULONG            rr_Addr;      /* network byte order                    */
+    char             rr_Host[128];
+};
+
+/* FALSE means no resolver: callers fall back to looking up in line. */
+BOOL  resolver_start(void);
+void  resolver_stop(void);
+BOOL  resolver_available(void);
+
+ULONG resolver_sigmask(void);
+void  resolver_handle_replies(void);
+
+BOOL  resolve_begin(struct STNode *n, const char *host, UWORD port);
+void  resolve_cancel(struct STNode *n);
+
 /* Outbound dialling and the network layer (net.c). */
 void node_dial(struct STNode *n, const char *target);
+void node_dial_resolved(struct STNode *n, BOOL ok, ULONG addr,
+                        const char *host, UWORD port);
 void node_online_write(struct STNode *n, const UBYTE *data, ULONG len, ULONG *consumed);
 
 BOOL net_init(void);
