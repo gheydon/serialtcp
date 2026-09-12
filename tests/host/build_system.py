@@ -317,14 +317,16 @@ def stage_config():
           "Work:SerialTCPd Work:serialtcp.conf\n"
           "Wait 3\n\n"
           "Run >NIL: <NIL: Execute Work:StatusLoop\n\n"
-          "; Mounting and activating five ports takes the better part of a\n"
-          "; minute, so DLG comes up in the background as well.  Its output\n"
-          "; goes to NIL:, not to a file on Work: -- pointed at the host\n"
-          "; directory drive, DLG-Startup stalled before activating a port.\n"
-          "Run >NIL: <NIL: Execute S:DLG-Startup\n\n"
           "; The MUI status window, on the Workbench screen.\n"
-          "Wait 3\n"
-          "Run >NIL: <NIL: Work:SerialTCPStat\n"
+          "Run >NIL: <NIL: Work:SerialTCPStat\n\n"
+          "; Mounting and activating five ports takes the better part of a\n"
+          "; minute, so DLG comes up in the background.  The script carries\n"
+          "; the s protection bit and is Run directly rather than through\n"
+          "; Execute: Run + Execute wedged part way through the port\n"
+          "; activations often enough to matter, always after the mounts and\n"
+          "; before the first ActivatePort.\n"
+          "Protect S:DLG-Startup +s\n"
+          "Run >NIL: <NIL: S:DLG-Startup\n"
           "; -----------------------------------------------------------------\n")
 
     # DLG ships SystemInfo.batch as an optional extra -- three AmigaDOS

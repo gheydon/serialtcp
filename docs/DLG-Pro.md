@@ -122,7 +122,7 @@ transports have largely replaced dial-up mailer sessions.
 Order matters. In `S:User-Startup`, or wherever you start things:
 
 1. Your TCP/IP stack (Roadshow, AmiTCP, Miami).
-2. `Run >NIL: SerialTCPd`
+2. `SerialTCPd` — it puts itself into the background, so no `Run` is needed.
 3. DLG.
 
 If DLG starts before the daemon, opening the device fails and the node will not
