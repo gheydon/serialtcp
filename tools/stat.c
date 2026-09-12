@@ -132,6 +132,15 @@ static Object *g_LblNodes,   *g_LblQueue, *g_LblQueueStats;
 static struct MUI_CustomClass *g_GraphClass;
 
 static char    g_LblNodesText[64];
+
+/*
+ * Byte totals from the previous refresh, so the graph can show a rate rather
+ * than an ever-climbing total.  The daemon's counters are per call, so the sum
+ * across nodes drops when somebody hangs up: a decrease is reported as zero
+ * rather than as a negative rate.
+ */
+static ULONG   g_PrevIn, g_PrevOut;
+static BOOL    g_HavePrev;
 static char    g_LblQueueText[64];
 static char    g_LblQueueStatsText[128];
 
@@ -317,7 +326,7 @@ static Object *build_graphs(void)
         MUIA_VertWeight, 100,
         Child, VGroup,
             MUIA_Frame,      MUIV_Frame_Group,
-            MUIA_FrameTitle, "Nodes in use",
+            MUIA_FrameTitle, "Nodes and traffic",
             Child, g_LblNodes = TextObject,
                 MUIA_Text_Contents, g_LblNodesText,
                 MUIA_Text_SetMin,   FALSE,
@@ -457,6 +466,8 @@ static void refresh_gui(void)
      */
     {
         UWORD inUse = 0;
+        ULONG totIn = 0, totOut = 0;
+        ULONG rateIn = 0, rateOut = 0;
 
         if (running)
         {
@@ -466,22 +477,54 @@ static void refresh_gui(void)
                 if (st == STS_ONLINE || st == STS_ESCAPED ||
                     st == STS_RINGING || st == STS_DIALING)
                     inUse++;
+
+                totIn  += snap.nodes[i].ns_BytesIn;
+                totOut += snap.nodes[i].ns_BytesOut;
+            }
+
+            if (g_HavePrev)
+            {
+                if (totIn  > g_PrevIn)  rateIn  = totIn  - g_PrevIn;
+                if (totOut > g_PrevOut) rateOut = totOut - g_PrevOut;
             }
         }
 
+        g_PrevIn   = totIn;
+        g_PrevOut  = totOut;
+        g_HavePrev = running;
+
+        /*
+         * Series 0 last: it is the one that triggers the redraw, so the two
+         * traffic traces are already in place when the panel repaints.  Both
+         * of those pass max 0 and find their own scale, which is the only way
+         * a byte rate can share a panel with a node count.
+         */
         if (g_GraphNodes)
-            DoMethod(g_GraphNodes, MUIM_Graph_Push, (ULONG)inUse,
-                     (ULONG)(running && snap.numNodes ? snap.numNodes : 1));
+        {
+            DoMethod(g_GraphNodes, MUIM_Graph_Push, 1, rateIn,  0, (ULONG)"in");
+            DoMethod(g_GraphNodes, MUIM_Graph_Push, 2, rateOut, 0, (ULONG)"out");
+            DoMethod(g_GraphNodes, MUIM_Graph_Push, 0, (ULONG)inUse,
+                     (ULONG)(running && snap.numNodes ? snap.numNodes : 1),
+                     (ULONG)"nodes");
+        }
 
         if (g_GraphQueue)
-            DoMethod(g_GraphQueue, MUIM_Graph_Push, (ULONG)(running ? snap.queued : 0),
-                     (ULONG)(running && snap.queueMax ? snap.queueMax : 1));
+            DoMethod(g_GraphQueue, MUIM_Graph_Push, 0, (ULONG)(running ? snap.queued : 0),
+                     (ULONG)(running && snap.queueMax ? snap.queueMax : 1), 0);
 
         if (g_LblNodes)
         {
             if (running)
-                snprintf(g_LblNodesText, sizeof(g_LblNodesText), "%u of %u busy",
-                         (unsigned)inUse, (unsigned)snap.numNodes);
+            {
+                char inbuf[16], outbuf[16];
+
+                fmt_bytes(inbuf,  sizeof(inbuf),  rateIn);
+                fmt_bytes(outbuf, sizeof(outbuf), rateOut);
+
+                snprintf(g_LblNodesText, sizeof(g_LblNodesText),
+                         "%u of %u busy   in %s/s  out %s/s",
+                         (unsigned)inUse, (unsigned)snap.numNodes, inbuf, outbuf);
+            }
             else
                 strcpy(g_LblNodesText, "-");
             set(g_LblNodes, MUIA_Text_Contents, g_LblNodesText);

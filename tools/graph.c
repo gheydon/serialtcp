@@ -18,10 +18,14 @@
 /*
  * graph.c -- a small scrolling history graph as a MUI custom class.
  *
- * One instance shows one series over time, Task Manager style: newest sample
- * at the right, older ones scrolling off to the left, drawn as a filled area
- * over a grid.  SerialTCPStat uses two of them, for nodes in use and for queue
- * depth.
+ * One instance shows up to GRAPH_SERIES traces over time, Task Manager style:
+ * newest sample at the right, older ones scrolling off to the left, drawn over
+ * a grid.  SerialTCPStat uses two of them: nodes in use with the byte rates in
+ * and out beside it, and queue depth on its own.
+ *
+ * Each trace keeps its own history and its own scale.  That is what lets a
+ * node count that never exceeds four share a panel with a byte rate in the
+ * thousands: scaled together the node line would be pinned flat to the floor.
  *
  * This is the one place in the project that needs a register-argument
  * callback, because that is how MUI dispatches to a custom class.  The
@@ -35,6 +39,7 @@
  */
 
 #include <exec/types.h>
+#include <graphics/gfxmacros.h>
 #include <intuition/intuition.h>
 #include <libraries/mui.h>
 
@@ -49,13 +54,31 @@
 
 #include "graph.h"
 
+struct GraphSeries
+{
+    ULONG        gs_Hist[GRAPH_SAMPLES];
+    UWORD        gs_Pos;      /* where the next sample goes                 */
+    UWORD        gs_Count;    /* how many are valid, up to GRAPH_SAMPLES    */
+    ULONG        gs_Max;      /* full scale; 0 means scale to its own peak  */
+    CONST_STRPTR gs_Name;     /* legend text, or NULL                       */
+};
+
 struct GraphData
 {
-    UBYTE  gd_Hist[GRAPH_SAMPLES];
-    UWORD  gd_Pos;        /* where the next sample goes                     */
-    UWORD  gd_Count;      /* how many are valid, up to GRAPH_SAMPLES        */
-    UWORD  gd_Max;        /* full-scale value; never zero                   */
+    struct GraphSeries gd_S[GRAPH_SERIES];
 };
+
+/*
+ * One pen per trace, all three of them dark on a light background: MPEN_SHINE
+ * and MPEN_MARK are not used because a scheme is free to make either of them
+ * white, and a white trace on the standard grey is barely there.
+ *
+ * Colour alone is not enough to tell three lines apart on a 4-colour screen,
+ * so the third is dashed as well.  The legend draws its key with the same pen
+ * and pattern, so the two always agree.
+ */
+static const UWORD series_pen[GRAPH_SERIES] = { MPEN_FILL, MPEN_TEXT, MPEN_SHADOW };
+static const UWORD series_pat[GRAPH_SERIES] = { 0xFFFF,    0xFFFF,    0xCCCC     };
 
 /* ------------------------------------------------------------------ */
 
@@ -69,7 +92,6 @@ static ULONG mNew(struct IClass *cl, Object *obj, struct opSet *msg)
 
     d = INST_DATA(cl, obj);
     memset(d, 0, sizeof(*d));
-    d->gd_Max = 1;
 
     return (ULONG)obj;
 }
@@ -95,18 +117,141 @@ static ULONG mAskMinMax(struct IClass *cl, Object *obj, struct MUIP_AskMinMax *m
 }
 
 /* Value of the sample `age` steps back from the newest, or -1 if not held. */
-static LONG sample_at(struct GraphData *d, UWORD age)
+static LONG sample_at(struct GraphSeries *s, UWORD age)
 {
     LONG idx;
 
-    if (age >= d->gd_Count)
+    if (age >= s->gs_Count)
         return -1;
 
-    idx = (LONG)d->gd_Pos - 1 - (LONG)age;
+    idx = (LONG)s->gs_Pos - 1 - (LONG)age;
     while (idx < 0)
         idx += GRAPH_SAMPLES;
 
-    return (LONG)d->gd_Hist[idx];
+    return (LONG)s->gs_Hist[idx];
+}
+
+/*
+ * Full scale for a trace: what the caller asked for, or the tallest sample it
+ * holds when the caller had no idea -- a byte rate has no natural ceiling, so
+ * it has to find its own.
+ */
+static ULONG series_scale(struct GraphSeries *s)
+{
+    ULONG peak = 0;
+    UWORD i;
+
+    if (s->gs_Max)
+        return s->gs_Max;
+
+    for (i = 0; i < s->gs_Count; i++)
+        if (s->gs_Hist[i] > peak)
+            peak = s->gs_Hist[i];
+
+    return peak ? peak : 1;
+}
+
+/* One trace, newest sample at the right. */
+static void draw_series(struct RastPort *rp, struct GraphSeries *s,
+                        LONG l, LONG t, LONG r, LONG b)
+{
+    ULONG scale = series_scale(s);
+    LONG  prevx = -1, prevy = 0;
+    LONG  x;
+
+    for (x = r; x >= l; x--)
+    {
+        UWORD age = (UWORD)(r - x);
+        LONG  v   = sample_at(s, age);
+        LONG  y;
+
+        if (v < 0)
+            break;
+
+        if ((ULONG)v > scale)
+            v = (LONG)scale;
+
+        y = b - (LONG)(((b - t) * (LONG)v) / (LONG)scale);
+        if (y < t)
+            y = t;
+
+        /* Join to the previous sample so the trace is continuous, including
+         * across a run of equal values and down to zero. */
+        if (prevx >= 0)
+        {
+            Move(rp, prevx, prevy);
+            Draw(rp, x, y);
+        }
+        else
+        {
+            WritePixel(rp, x, y);
+        }
+
+        prevx = x;
+        prevy = y;
+    }
+}
+
+/*
+ * A key along the top: a dash in each trace's own pen followed by its name.
+ * Without it three lines on one panel are a guessing game.  Skipped when the
+ * panel is too short or too narrow to take it, which keeps the graph usable
+ * when the window is dragged small.
+ */
+static void draw_legend(struct RastPort *rp, struct GraphData *d,
+                        const UWORD *pens, LONG l, LONG t, LONG r)
+{
+#define LEG_DASH 10
+#define LEG_GAP   3
+#define LEG_SEP   8
+    LONG  width = 0;
+    LONG  x, y;
+    UWORD i, named = 0;
+
+    for (i = 0; i < GRAPH_SERIES; i++)
+    {
+        if (!d->gd_S[i].gs_Name || !d->gd_S[i].gs_Count)
+            continue;
+        width += LEG_DASH + LEG_GAP
+               + TextLength(rp, (CONST_STRPTR)d->gd_S[i].gs_Name,
+                            (ULONG)strlen(d->gd_S[i].gs_Name)) + LEG_SEP;
+        named++;
+    }
+
+    if (named < 2 || width <= 0 || width > (r - l) - 4)
+        return;
+
+    x = r - 2 - width + LEG_SEP;
+    y = t + 1;
+
+    /* Clear the strip first: a trace running along the top would otherwise
+     * read straight through the key. */
+    SetAPen(rp, pens[MPEN_BACKGROUND]);
+    RectFill(rp, x - LEG_GAP, y, r - 1, y + rp->TxHeight);
+
+    for (i = 0; i < GRAPH_SERIES; i++)
+    {
+        struct GraphSeries *s = &d->gd_S[i];
+        LONG                mid = y + rp->TxHeight / 2;
+        ULONG               len;
+
+        if (!s->gs_Name || !s->gs_Count)
+            continue;
+
+        len = (ULONG)strlen(s->gs_Name);
+
+        SetAPen(rp, pens[series_pen[i]]);
+        SetDrPt(rp, series_pat[i]);
+        Move(rp, x, mid);
+        Draw(rp, x + LEG_DASH - 1, mid);
+        SetDrPt(rp, 0xFFFF);
+        x += LEG_DASH + LEG_GAP;
+
+        SetAPen(rp, pens[MPEN_TEXT]);
+        Move(rp, x, y + rp->TxBaseline);
+        Text(rp, (CONST_STRPTR)s->gs_Name, len);
+        x += TextLength(rp, (CONST_STRPTR)s->gs_Name, len) + LEG_SEP;
+    }
 }
 
 static ULONG mDraw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
@@ -116,7 +261,6 @@ static ULONG mDraw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     const UWORD      *pens;
     LONG              l, t, w, h, r, b;
     LONG              x, i;
-    LONG              prevx = -1, prevy = 0;
 
     DoSuperMethodA(cl, obj, (Msg)msg);
 
@@ -156,45 +300,22 @@ static ULONG mDraw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     }
 
     /*
-     * The trace, newest sample at the right. A line only -- no fill beneath
-     * it, so overlapping detail stays readable and the grid shows through.
-     *
-     * MPEN_FILL rather than MPEN_SHINE: on the standard grey MUI background a
-     * white line nearly disappears, whereas the fill pen is a strong colour
-     * in every scheme.
+     * The traces: lines only, no fill beneath them, so where two cross both
+     * stay readable and the grid shows through.  Drawn back to front so
+     * series 0 -- the one the panel is named after -- ends up on top.
      */
-    SetAPen(rp, pens[MPEN_FILL]);
-    for (x = r; x >= l; x--)
+    for (i = GRAPH_SERIES - 1; i >= 0; i--)
     {
-        UWORD age = (UWORD)(r - x);
-        LONG  v   = sample_at(d, age);
-        LONG  y;
-
-        if (v < 0)
-            break;
-
-        if ((UWORD)v > d->gd_Max)
-            v = d->gd_Max;
-
-        y = b - ((b - t) * v) / (LONG)d->gd_Max;
-        if (y < t)
-            y = t;
-
-        /* Join to the previous sample so the trace is continuous, including
-         * across a run of equal values and down to zero. */
-        if (prevx >= 0)
-        {
-            Move(rp, prevx, prevy);
-            Draw(rp, x, y);
-        }
-        else
-        {
-            WritePixel(rp, x, y);
-        }
-
-        prevx = x;
-        prevy = y;
+        if (!d->gd_S[i].gs_Count)
+            continue;
+        SetAPen(rp, pens[series_pen[i]]);
+        SetDrPt(rp, series_pat[i]);
+        draw_series(rp, &d->gd_S[i], l, t, r, b);
     }
+    SetDrPt(rp, 0xFFFF);
+
+    if (h >= 30)
+        draw_legend(rp, d, pens, l, t, r);
 
     /* Frame it, so it reads as a panel rather than a hole in the window. */
     SetAPen(rp, pens[MPEN_SHADOW]);
@@ -207,32 +328,48 @@ static ULONG mDraw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
 
 static ULONG mPush(struct IClass *cl, Object *obj, struct MUIP_Graph_Push *msg)
 {
-    struct GraphData *d = INST_DATA(cl, obj);
+    struct GraphData   *d = INST_DATA(cl, obj);
+    struct GraphSeries *s;
+
+    if (msg->series >= GRAPH_SERIES)
+        return 0;
+
+    s = &d->gd_S[msg->series];
 
     /*
      * The scale can move: nodes can be reconfigured and the queue size is not
      * known until the daemon answers. Storing raw values and rescaling at draw
      * time means old samples stay meaningful when it does.
      */
-    d->gd_Max = (UWORD)(msg->max ? msg->max : 1);
+    s->gs_Max = msg->max;
+    if (msg->name)
+        s->gs_Name = msg->name;
 
-    d->gd_Hist[d->gd_Pos] = (UBYTE)(msg->value > 255 ? 255 : msg->value);
-    d->gd_Pos = (UWORD)((d->gd_Pos + 1) % GRAPH_SAMPLES);
+    s->gs_Hist[s->gs_Pos] = msg->value;
+    s->gs_Pos = (UWORD)((s->gs_Pos + 1) % GRAPH_SAMPLES);
 
-    if (d->gd_Count < GRAPH_SAMPLES)
-        d->gd_Count++;
+    if (s->gs_Count < GRAPH_SAMPLES)
+        s->gs_Count++;
 
-    MUI_Redraw(obj, MADF_DRAWOBJECT);
+    /* Only series 0 repaints, so a caller feeding three traces gets one
+     * redraw a tick rather than three.  See graph.h. */
+    if (msg->series == 0)
+        MUI_Redraw(obj, MADF_DRAWOBJECT);
+
     return 0;
 }
 
 static ULONG mClear(struct IClass *cl, Object *obj, Msg msg)
 {
     struct GraphData *d = INST_DATA(cl, obj);
+    UWORD             i;
 
-    d->gd_Pos   = 0;
-    d->gd_Count = 0;
-    memset(d->gd_Hist, 0, sizeof(d->gd_Hist));
+    for (i = 0; i < GRAPH_SERIES; i++)
+    {
+        d->gd_S[i].gs_Pos   = 0;
+        d->gd_S[i].gs_Count = 0;
+        memset(d->gd_S[i].gs_Hist, 0, sizeof(d->gd_S[i].gs_Hist));
+    }
 
     MUI_Redraw(obj, MADF_DRAWOBJECT);
     return 0;
