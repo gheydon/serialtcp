@@ -42,6 +42,13 @@ Two things the install floppies do not give you, which the script supplies:
   disk at the end.
 - **The assigns a real install makes** -- `CLIPS:`, `REXX:`, `PRINTERS:`,
   `KEYMAPS:`, `LOCALE:`, `LIBS: SYS:Classes ADD`, `HELP:`.
+- **MUI**, which `SerialTCPStat` needs. It is not on the floppies and was
+  installed into the image by hand, so a copy is kept at `MUI-backup` beside
+  the image and staged back in on every rebuild. Without that copy the script
+  says so and carries on: the GUI client then falls back to its text mode.
+  The generated `S:User-Startup` only makes the `MUI:` and `LIBS:` assigns if
+  `SYS:MUI` exists, because a failed assign ends the startup script before
+  anything else in it runs -- which looks exactly like the machine not booting.
 
 SerialTCP itself lives on a separate host-directory drive (`Work:`) so
 binaries can be replaced and logs read from the host without rebuilding the

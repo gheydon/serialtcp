@@ -43,6 +43,12 @@ XDFTOOL = f"{BASE}/.venv/bin/xdftool"
 IMAGE   = f"{BASE}/Workbench.hdf"
 DISKS   = "/Users/gordon/Source/amiga/serialtcp/reference/dlg/disks"
 
+# MUI does not come from the install floppies -- it was installed into the
+# image by hand. Since stage_os() wipes the staging directory on every run, a
+# copy is kept outside it and staged back in here; without this a rebuild
+# quietly drops MUI and SerialTCPStat falls back to its text mode.
+MUI_SRC = f"{BASE}/MUI-backup"
+
 SIZE       = "600Mi"
 NODES      = 4
 DEVICE     = "serialtcp.device"
@@ -139,6 +145,17 @@ def stage_os():
         if os.path.isdir(src):
             total += merge(src, os.path.join(STAGE, target) if target else STAGE)
     print(f"  AmigaOS 3.2: {total} files")
+    return total
+
+
+def stage_mui():
+    if not os.path.isdir(MUI_SRC):
+        print(f"  MUI: nothing at {MUI_SRC} -- the GUI client will fall back "
+              f"to text mode")
+        return 0
+
+    total = merge(MUI_SRC, f"{STAGE}/MUI")
+    print(f"  MUI: {total} files")
     return total
 
 
@@ -306,8 +323,12 @@ def stage_config():
     # straight on to LoadWB.
     write(f"{STAGE}/S/User-Startup",
           "; --- MUI ---------------------------------------------------------\n"
-          "Assign >NIL: MUI:  SYS:MUI\n"
-          "Assign >NIL: LIBS: MUI:Libs ADD\n"
+          "; Guarded: without MUI these assigns fail, and a failed assign ends\n"
+          "; the startup before anything else in it runs.\n"
+          "If EXISTS SYS:MUI\n"
+          "  Assign >NIL: MUI:  SYS:MUI\n"
+          "  Assign >NIL: LIBS: MUI:Libs ADD\n"
+          "EndIf\n"
           "; -----------------------------------------------------------------\n\n"
           "; --- SerialTCP + DLG ---------------------------------------------\n"
           "; Work: is a separate drive holding the SerialTCP build, its config\n"
@@ -360,13 +381,15 @@ def main():
     unpack_os()
     print("\nStaging a real system:")
     stage_os()
+    stage_mui()
     stage_dlg()
     stage_config()
 
     print("\nChecks:")
     for p in ("Libs/diskfont.library", "S/Startup-Sequence", "S/User-Startup",
               "S/DLG-Startup", "Devs/TPTMountlist", "DLG/ActivatePort",
-              "DLGConfig/Port/TR3.port", "Libs/dlg.library"):
+              "DLGConfig/Port/TR3.port", "Libs/dlg.library",
+              "MUI/Libs/muimaster.library"):
         print(f"  {'ok ' if os.path.exists(f'{STAGE}/{p}') else 'MISSING'} {p}")
 
     print("\nPort audit:")
