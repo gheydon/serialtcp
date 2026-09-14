@@ -163,6 +163,17 @@ caller's `NO CARRIER` was visibly arriving at the start of the next caller's
 session. The clear has to happen *before* the result code is emitted, or
 `NO CARRIER` goes out with the stale data.
 
+**A MUI program needs far more stack than a shell hands it.** Laying out and
+rendering a window goes many calls deep inside `muimaster.library`, and a
+process started with `Run` gets 4K. `SerialTCPStat` allocates its own 32K stack
+and runs the GUI on it with `StackSwap()`, restoring the caller's before it
+returns, so it does not depend on the caller typing `stack 32000` or on an icon
+tooltype that would only cover Workbench launches. The memory is held only
+while the window is open. Overflowing a stack on this hardware does not fault:
+it grows down into the heap and quietly rewrites what is below it, so the
+damage surfaces later and somewhere else entirely. See
+[Testing.md](Testing.md) for what that looked like.
+
 **Excluding a node from the pool is checked in `node_offer_call()`,** not at
 the accept site. Putting it there means the queue honours it for free — a
 dial-out-only node is skipped by direct routing and by queue promotion alike,

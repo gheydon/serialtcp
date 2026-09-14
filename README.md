@@ -270,6 +270,7 @@ The point of the design is to stay small enough for real hardware:
 | `serialtcp.device` | 2896 bytes (2412 with `-DST_MINIMAL`) |
 | `SerialTCPd` | 31 KB |
 | Runtime data, 4 nodes | ~19 KB |
+| `SerialTCPStat` while open | 32 KB of stack, freed when the window closes |
 
 All the logic lives in the daemon; the device is a shim that allocates units
 and forwards IORequests. The only thing in it that is not strictly necessary is
@@ -281,6 +282,11 @@ the console error message on a failed open, which costs 484 bytes. To drop it:
 
 The specific `io_Error` codes are present either way — only the human-readable
 text goes.
+
+The GUI client is the one exception to the small-and-quiet rule: it takes a
+32 KB stack for as long as its window is open, because MUI needs far more
+stack than a shell hands out and the alternative is a crash that takes the
+machine with it. The shell client and the daemon are unaffected.
 
 Nothing is ever allocated from Chip RAM. Every allocation uses `MEMF_ANY`, so
 on a machine with Fast RAM Exec satisfies all of it from Fast and leaves Chip

@@ -156,6 +156,8 @@ Everything below was observed on AmigaOS 3.2 under FS-UAE, not inferred:
 | `queue-lie inflate` | caller told 5, 6, 7, 8, 9 while genuinely first in line |
 | Lie does not reorder | caller told "number 7" still served before a later arrival |
 | No cross-caller leak | text typed by one caller and never read does not appear in the next caller's session |
+| `SerialTCPStat` exits cleanly | three runs of the full GUI from a 4K shell stack, no process left behind |
+| Breaking the GUI with Ctrl-C | process exits, machine stays up |
 
 Sample of the status client running on the Amiga during two calls and one
 queued caller:
@@ -205,6 +207,100 @@ calls and those that keep it open. Afterwards:
 ```
 
 and the caller gets DLG's login screen.
+
+## The crash that hid behind everything
+
+`SerialTCPStat` crashed every single time it exited. It was noticed through
+Ctrl-C -- breaking the running program took the whole machine down -- but
+Ctrl-C had nothing to do with it. A build that quit itself after a few seconds,
+with no break sent, did exactly the same.
+
+It was a stack overflow. MUI's layout and rendering path goes many calls deep
+inside `muimaster.library`, and a process started with `Run` gets 4K.
+
+Nothing about it presents as a stack overflow, because the overflow does not
+fault. The stack grows down into the heap and rewrites whatever is below it, so
+what you see happens well after the damage and rarely twice the same way:
+
+- the program dying at exit with `Software Failure #80000004`, an illegal
+  instruction, after jumping through something the overflow had rewritten
+- exec's `81000005` alert -- a corrupt memory list
+- the machine resetting outright, with no alert at all
+
+Each crashed process stays suspended rather than exiting, so they accumulate
+until the machine freezes.
+
+The measurement that settled it, same boot and same binary, with only the
+shell's stack size differing:
+
+| shell stack | result       |
+|-------------|--------------|
+| 32000 bytes | clean, twice |
+| 4000 bytes  | crashed, twice |
+
+What made it expensive to find is that the fault moves with code layout. Adding
+three lines at the end of `main()` was enough to hide it completely, which sends
+you chasing whatever you last touched. Disproved by experiment, in order: the
+graph custom class, the node table, the graphs, the buttons, the timer, the
+daemon probe, all refreshes, the MUI teardown order, `-fomit-frame-pointer`,
+linking with `-s`, owning the library bases rather than the toolchain's, and
+every optimisation level from `-O0` to `-O2`. A minimal MUI program with the
+same event loop, timer and teardown never crashed at all -- its call chain is
+shallow, which in hindsight was the clue.
+
+The fix is in `tools/stat.c`; see [DESIGN.md](DESIGN.md).
+
+### Driving the UAE debugger
+
+FS-UAE has the WinUAE debugger built in, and it is scriptable, which is how the
+corrupt-memory-list alert was caught in the act:
+
+```
+console_debugger = 1
+keyboard_key_f8 = action_enter_debugger
+```
+
+It only talks to a terminal, so it needs a pty -- `script` will not do if the
+calling shell has a socket on stdin. `ptydrv.py` (kept with the scratch files,
+not in the repo) runs FS-UAE on a pty, logs everything it prints, and types
+anything appended to a command file at the debugger prompt.
+
+Commands that earned their keep: `i` dumps the exception vectors, `TM` walks
+the memory list, `Tt` lists tasks, `f <addr>` sets a breakpoint, `Za <addr>`
+names the segment an address belongs to, and `wd 1` is an Enforcer equivalent
+that breaks on access to invalid addresses. That last one is worth knowing
+about for the negative result it gives: it never fired here, which says the bad
+writes were going to *valid* memory -- exactly what a stack overflow does, and
+what Enforcer on real hardware would also have missed.
+
+Two things do not work as advertised in FS-UAE 3.2.35: `il`, the exception
+breakpoint, prints a raw `%I64X` and never fires; and macOS grabs F11, so bind
+the debugger to something else.
+
+### Measuring crashes reliably
+
+Hard-killing FS-UAE leaves the hard drive image unvalidated. Reads still work
+and writes fail silently, so on the next boot the startup script dies at its
+first redirect and nothing runs at all.
+
+That is worse than it sounds, because a harness that counts "no log" as "no
+crash" then reports every configuration as passing -- which happened here, and
+produced a confidently wrong bisect that had to be thrown away. The harness now
+refuses to score a run whose log does not contain both its start and finish
+markers, and every comparison includes a control that is known to crash. If the
+control comes out clean, the run is not evidence.
+
+Where a crash is being measured, run all the variants in one boot and count the
+processes left behind afterwards:
+
+```
+Run >NIL: <NIL: DH0:StatTest
+Wait 20
+Status >>DH0:trials.log
+```
+
+A crashed Amiga process stays suspended and keeps its entry, so the count of
+leftovers is the count of crashes.
 
 ## Still untested
 
