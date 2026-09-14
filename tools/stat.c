@@ -36,6 +36,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <exec/ports.h>
+#include <exec/tasks.h>
 #include <dos/dos.h>
 #include <dos/dostags.h>
 #include <devices/timer.h>
@@ -897,6 +898,52 @@ static void usage(void)
 }
 
 
+/*
+ * MUI needs far more stack than a shell hands out.
+ *
+ * Laying out and rendering a window goes many calls deep inside
+ * muimaster.library, and a process started with Run gets 4K by default. The
+ * overflow does not fault: the stack simply grows down into the heap and
+ * quietly rewrites whatever is below it. What you see is the program dying as
+ * it exits, or exec noticing a corrupt memory list, or the machine resetting
+ * -- all well after the damage, and sensitive enough to code layout that
+ * almost any edit moves it. That is what made it so hard to find.
+ *
+ * Rather than rely on the caller getting `stack 16000` right, or on an icon
+ * tooltype that only applies to Workbench launches, the program gives itself
+ * a stack it knows is big enough and puts the old one back afterwards. The
+ * memory is held only while the window is up.
+ */
+#define GUI_STACK_SIZE 32768
+
+static int run_gui_on_own_stack(UWORD nodes)
+{
+    struct StackSwapStruct sss;
+    UBYTE                 *stack;
+    int                    rc;
+
+    stack = (UBYTE *)AllocMem(GUI_STACK_SIZE, MEMF_ANY);
+    if (!stack)
+    {
+        /* Out of memory for a private stack: better to run on the caller's
+         * and risk it than to refuse to start. */
+        printf("SerialTCPStat: no memory for a private stack -- if the window\n"
+               "               misbehaves, try 'stack 32000' before running.\n");
+        return run_gui(nodes);
+    }
+
+    sss.stk_Lower   = (APTR)stack;
+    sss.stk_Upper   = (ULONG)(stack + GUI_STACK_SIZE);
+    sss.stk_Pointer = (APTR)(stack + GUI_STACK_SIZE);
+
+    StackSwap(&sss);
+    rc = run_gui(nodes);
+    StackSwap(&sss);            /* back to the caller's stack before returning */
+
+    FreeMem(stack, GUI_STACK_SIZE);
+    return rc;
+}
+
 int main(int argc, char **argv)
 {
     struct Snapshot probe;
@@ -945,7 +992,7 @@ int main(int argc, char **argv)
     /* Optional: without it the window simply has no graphs. */
     g_GraphClass = graph_create_class();
 
-    rc = run_gui(nodes);
+    rc = run_gui_on_own_stack(nodes);
 
     /* Fails if any object of the class is somehow still alive, which would
      * leave MUI holding a dispatcher pointer into code about to be unloaded.
