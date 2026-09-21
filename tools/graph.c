@@ -116,6 +116,28 @@ static ULONG mAskMinMax(struct IClass *cl, Object *obj, struct MUIP_AskMinMax *m
     return 0;
 }
 
+/*
+ * Where a sample of a given age sits horizontally.
+ *
+ * The whole ring is mapped across the panel rather than drawn a pixel per
+ * sample: a panel is usually wider than GRAPH_SAMPLES, and stepping one pixel
+ * at a time left the trace stranded partway across with no way to ever reach
+ * the left edge, however long the program ran. Mapping the ring instead means
+ * the graph always spans its panel, and a freshly started one grows leftwards
+ * and arrives at the left edge exactly when the history fills.
+ */
+static LONG age_to_x(UWORD age, LONG l, LONG r)
+{
+    LONG span = r - l;
+    LONG x;
+
+    if (span <= 0)
+        return l;
+
+    x = r - (LONG)(((ULONG)age * (ULONG)span) / (GRAPH_SAMPLES - 1));
+    return (x < l) ? l : x;
+}
+
 /* Value of the sample `age` steps back from the newest, or -1 if not held. */
 static LONG sample_at(struct GraphSeries *s, UWORD age)
 {
@@ -157,16 +179,17 @@ static void draw_series(struct RastPort *rp, struct GraphSeries *s,
 {
     ULONG scale = series_scale(s);
     LONG  prevx = -1, prevy = 0;
-    LONG  x;
+    UWORD age;
 
-    for (x = r; x >= l; x--)
+    for (age = 0; age < GRAPH_SAMPLES; age++)
     {
-        UWORD age = (UWORD)(r - x);
-        LONG  v   = sample_at(s, age);
-        LONG  y;
+        LONG v = sample_at(s, age);
+        LONG x, y;
 
         if (v < 0)
             break;
+
+        x = age_to_x(age, l, r);
 
         if ((ULONG)v > scale)
             v = (LONG)scale;
@@ -284,8 +307,11 @@ static ULONG mDraw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
     SetAPen(rp, pens[MPEN_BACKGROUND]);
     RectFill(rp, l, t, r, b);
 
-    /* Grid: quarters horizontally, every 20 samples vertically. Quiet enough
-     * to read the trace against, which is the whole point of having it. */
+    /*
+     * Grid: quarters horizontally, and a vertical every GRAPH_GRID_SAMPLES
+     * back in time. The verticals go through the same mapping as the trace,
+     * so they stay a fixed number of seconds apart whatever the panel width.
+     */
     SetAPen(rp, pens[MPEN_HALFSHADOW]);
     for (i = 1; i < 4; i++)
     {
@@ -293,8 +319,11 @@ static ULONG mDraw(struct IClass *cl, Object *obj, struct MUIP_Draw *msg)
         Move(rp, l, y);
         Draw(rp, r, y);
     }
-    for (x = r - 20; x > l; x -= 20)
+    for (i = GRAPH_GRID_SAMPLES; i < GRAPH_SAMPLES; i += GRAPH_GRID_SAMPLES)
     {
+        x = age_to_x((UWORD)i, l, r);
+        if (x <= l)
+            break;
         Move(rp, x, t);
         Draw(rp, x, b);
     }

@@ -28,6 +28,9 @@
 /* Two minutes of history at the client's one-second refresh. */
 #define GRAPH_SAMPLES 120
 
+/* Spacing of the vertical grid lines, in samples -- so one every 30 seconds. */
+#define GRAPH_GRID_SAMPLES 30
+
 /* How many traces one graph can hold. Each keeps its own history and its own
  * scale, so a count of nodes and a byte rate can share a panel without one
  * flattening the other. */
