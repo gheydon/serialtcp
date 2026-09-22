@@ -455,8 +455,9 @@ void node_online_write(struct STNode *n, const UBYTE *data, ULONG len, ULONG *co
             n->n_PlusCount = 0;
         }
 
-        /* Forward everything up to the next candidate escape character. */
-        start = i;
+        /* Consume this byte even when it is a plus outside the guard time,
+         * then stop before the next candidate escape character. */
+        start = i++;
         while (i < len && data[i] != n->n_SReg[2])
             i++;
 
