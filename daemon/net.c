@@ -504,6 +504,13 @@ static void socket_write(struct STNode *n)
  * A ringing node became readable.  Peek rather than read: if the caller has
  * gone we must stop ringing, but if they merely typed ahead their bytes have
  * to stay in the socket buffer until the call is answered.
+ *
+ * Whether the hangup reports NO CARRIER depends on how far the call had got.
+ * A caller who gives up while the phone is still ringing just stops ringing,
+ * exactly as a real line does.  But once the application has sent ATA it is
+ * waiting for an answer, so a caller lost during connect-delay's silence has
+ * to be reported -- otherwise the ATA is never answered at all and the BBS
+ * sits out its own connect timeout before it can take the next call.
  */
 static void ringing_check(struct STNode *n)
 {
@@ -514,10 +521,11 @@ static void ringing_check(struct STNode *n)
 
     if (got == 0)
     {
-        log_printf("node %lu: caller %s gave up before answer",
-                   (unsigned long)n->n_Num, n->n_PeerName);
+        log_printf("node %lu: caller %s %s", (unsigned long)n->n_Num, n->n_PeerName,
+                   n->n_AnswerPending ? "dropped while answering"
+                                      : "gave up before answer");
         node_set_status(n, (UWORD)(n->n_Unit ? (n->n_Unit->su_Status & ~(1 << 2)) : 0));
-        node_hangup(n, FALSE);
+        node_hangup(n, n->n_AnswerPending);
         return;
     }
 
@@ -526,7 +534,7 @@ static void ringing_check(struct STNode *n)
         log_printf("node %lu: caller %s vanished (errno %d)",
                    (unsigned long)n->n_Num, n->n_PeerName, (int)Errno());
         node_set_status(n, (UWORD)(n->n_Unit ? (n->n_Unit->su_Status & ~(1 << 2)) : 0));
-        node_hangup(n, FALSE);
+        node_hangup(n, n->n_AnswerPending);
     }
 }
 

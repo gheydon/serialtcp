@@ -219,6 +219,7 @@ void node_online(struct STNode *n, LONG sock, const char *peer, BOOL server)
 
     n->n_PlusCount   = 0;
     n->n_TimerActive = FALSE;
+    n->n_AnswerPending = FALSE;
     n->n_RingCount   = 0;
 
     /* Carrier up: DSR, CTS and CD all asserted (bits clear), RI off. */
@@ -253,6 +254,7 @@ void node_hangup(struct STNode *n, BOOL sendNoCarrier)
     n->n_PlusCount   = 0;
     n->n_RingCount   = 0;
     n->n_TimerActive = FALSE;
+    n->n_AnswerPending = FALSE;
 
     /* Anything still queued for the socket is now meaningless. */
     fifo_clear(&n->n_Tx);
@@ -351,6 +353,24 @@ void node_answer(struct STNode *n)
 
     sock = n->n_Sock;
     node_set_status(n, status_with(n, (1 << 2), 0));   /* RI off */
+
+    /*
+     * connect-delay: a real modem stays silent for seconds while it trains, and
+     * some BBSes (C-Net 3) clear their input just after sending ATA. Hold the
+     * CONNECT back so it lands after that, instead of being thrown away with it.
+     * node_pump() finishes the answer when the delay is up.
+     */
+    if (g_Config.c_ConnectDelay)
+    {
+        if (n->n_AnswerPending)
+            return;                                 /* a second ATA while training */
+        n->n_AnswerPending = TRUE;
+        st_gettime(&n->n_Timer);
+        log_printf("node %lu: answering %s, CONNECT in %lu ms", (unsigned long)n->n_Num,
+                   n->n_PeerName, (unsigned long)g_Config.c_ConnectDelay);
+        return;
+    }
+
     node_online(n, sock, n->n_PeerName, TRUE);
 }
 
@@ -857,6 +877,14 @@ void node_pump(struct STNode *n)
 
     if (!n->n_Attached)
         return;
+
+    /* An answered call waiting out connect-delay: no more rings, then CONNECT. */
+    if (n->n_State == NS_RINGING && n->n_AnswerPending)
+    {
+        if ((ULONG)st_elapsed_ms(&n->n_Timer) >= g_Config.c_ConnectDelay && n->n_Sock >= 0)
+            node_online(n, n->n_Sock, n->n_PeerName, TRUE);
+        return;
+    }
 
     /* Ring cadence for an unanswered inbound call. */
     if (n->n_State == NS_RINGING && n->n_TimerActive)
