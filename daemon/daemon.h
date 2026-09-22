@@ -235,6 +235,7 @@ struct STNode
     struct timeval   n_Timer;
     UWORD            n_RingCount;
     BOOL             n_TimerActive;
+    BOOL             n_AnswerPending;   /* ATA taken, CONNECT waits on connect-delay */
 
     ULONG            n_ConnectBaud;    /* what we claim in CONNECT <n>     */
     ULONG            n_BytesIn;        /* statistics, for the status client */
@@ -351,6 +352,7 @@ struct Config
     BOOL   c_Telnet;              /* speak telnet, not raw TCP            */
     ULONG  c_AnswerBaud;          /* reported in CONNECT                  */
     UWORD  c_RingsBeforeBusy;     /* how long to ring before giving up    */
+    ULONG  c_ConnectDelay;        /* ms from ATA to CONNECT, 0 = at once  */
     UWORD  c_AutoAnswer;          /* default S0 value                     */
     ULONG  c_OutboundOnly;        /* bitmask of units excluded from the pool */
     ULONG  c_NodeSettle;          /* seconds a node must be idle first    */

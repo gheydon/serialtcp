@@ -45,6 +45,7 @@ void config_defaults(void)
     g_Config.c_Telnet           = TRUE;
     g_Config.c_AnswerBaud       = 38400;
     g_Config.c_RingsBeforeBusy  = 8;
+    g_Config.c_ConnectDelay     = 0;
     g_Config.c_AutoAnswer       = 1;
     g_Config.c_NodeSettle       = 2;
     g_Config.c_RxBufSize        = RXBUF_DEFAULT;
@@ -308,6 +309,13 @@ BOOL config_load(const char *path)
             int r = atoi(val);
             if (r < 1) r = 1;
             g_Config.c_RingsBeforeBusy = (UWORD)r;
+        }
+        else if (!stricmp(key, "connect-delay"))
+        {
+            int d = atoi(val);
+            if (d < 0) d = 0;
+            if (d > 30000) d = 30000;
+            g_Config.c_ConnectDelay = (ULONG)d;
         }
         else if (!stricmp(key, "when-busy"))
         {

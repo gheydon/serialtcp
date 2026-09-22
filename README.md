@@ -131,6 +131,16 @@ string, let it wait for `RING`, let it answer. All of that works. Carrier
 detect works too, so when a caller drops the line the BBS logs them off exactly
 as it would on a real modem.
 
+If the BBS answers and then times out waiting for a caller it never sees, try
+`connect-delay`. A real modem trains for a few seconds before reporting
+`CONNECT`, and software written for one can rely on that: C-Net 3 clears its
+serial input just after sending `ATA`, which throws away a `CONNECT` that
+arrived immediately. `connect-delay 5000` holds it back long enough to survive
+the clear. It defaults to 0, so nothing waits unless you ask for it.
+A caller who hangs up during the delay is reported as `NO CARRIER`, so an
+`ATA` is always answered one way or the other. A caller who gives up while the
+line is still ringing simply stops ringing, as on a real line.
+
 ## Checking on it
 
 ### From a shell — `SerialTCPStatus`
